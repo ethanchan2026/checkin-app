@@ -21,7 +21,7 @@ jobs:
 
       - name: Install Dependencies
         run: |
-          npm install @supabase/supabase-js resend --no-save
+          npm install --save-dev @supabase/supabase-js resend
 
       - name: Run Reminder Script
         env:

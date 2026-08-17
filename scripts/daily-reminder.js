@@ -1,21 +1,23 @@
-import { createClient } from '@supabase/supabase-js';
-import { Resend } from 'resend';
+// scripts/daily-reminder.js
+const { createClient } = require('@supabase/supabase-js');
+const { Resend } = require('resend');
 
-console.log('--- 1. 脚本已启动 ---');
+console.log('========================================');
+console.log('🦉 [1/5] 定时任务进程启动...');
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev';
 
-console.log('--- 2. 检查环境变量 ---');
-console.log('SUPABASE_URL 是否存在:', !!SUPABASE_URL);
-console.log('SUPABASE_KEY 是否存在:', !!SUPABASE_SERVICE_ROLE_KEY);
-console.log('RESEND_KEY 是否存在:', !!RESEND_API_KEY);
-console.log('SENDER_EMAIL:', SENDER_EMAIL);
+console.log('🦉 [2/5] 检查环境变量:');
+console.log('- SUPABASE_URL:', SUPABASE_URL ? '✅ 已配置' : '❌ 缺失');
+console.log('- SUPABASE_KEY:', SUPABASE_SERVICE_ROLE_KEY ? '✅ 已配置' : '❌ 缺失');
+console.log('- RESEND_API_KEY:', RESEND_API_KEY ? '✅ 已配置' : '❌ 缺失');
+console.log('- SENDER_EMAIL:', SENDER_EMAIL);
 
 if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !RESEND_API_KEY) {
-  console.error('❌ 缺少必要的环境变量，请检查 GitHub Secrets！');
+  console.error('❌ 环境变量缺失，退出脚本！');
   process.exit(1);
 }
 
@@ -38,10 +40,10 @@ function getDaysPassed(dateStr) {
   return Math.round((today - start) / (1000 * 60 * 60 * 24));
 }
 
-async function main() {
+async function run() {
   try {
     const todayStr = getBeijingTodayStr();
-    console.log(`🚀 [${todayStr}] 开始查询 Supabase 数据库...`);
+    console.log(`🦉 [3/5] 今日日期(北京时间): ${todayStr}，正在连接 Supabase...`);
 
     const { data: items, error } = await supabase
       .from('knowledge_base')
@@ -52,10 +54,10 @@ async function main() {
       process.exit(1);
     }
 
-    console.log(`📦 成功查询到 ${items?.length || 0} 条卡片数据`);
+    console.log(`🦉 [4/5] 成功查询到 ${items?.length || 0} 条卡片数据`);
 
     if (!items || items.length === 0) {
-      console.log('⚠️ 数据库为空，无任务需要提醒。');
+      console.log('⚠️ 数据库中没有任何卡片数据，无需提醒。');
       return;
     }
 
@@ -94,12 +96,14 @@ async function main() {
     });
 
     const userEmails = Object.keys(userTasksMap);
-    console.log(`🎯 今日有复习任务的用户数: ${userEmails.length}`);
+    console.log(`🎯 今日命中有复习任务的用户数: ${userEmails.length}`);
 
     if (userEmails.length === 0) {
       console.log('🎉 今日所有卡片均不在复习窗口内。');
       return;
     }
+
+    console.log('🦉 [5/5] 开始发送邮件通知...');
 
     for (const email of userEmails) {
       const tasks = userTasksMap[email];
@@ -107,7 +111,7 @@ async function main() {
         .map((t, idx) => `<li style="margin: 8px 0;"><strong>#${idx + 1} [${t.subject}]</strong> — 第 ${t.stage} 次复习</li>`)
         .join('');
 
-      console.log(`✉️ 正在向 ${email} 发起 Resend 邮件发送请求...`);
+      console.log(`✉️ 正在向 ${email} 提交 Resend 发信请求...`);
 
       const result = await resend.emails.send({
         from: `复习打卡提醒 <${SENDER_EMAIL}>`,
@@ -132,11 +136,10 @@ async function main() {
       }
     }
   } catch (err) {
-    console.error('💥 运行时发生异常:', err);
+    console.error('💥 运行时发生未知异常:', err);
   } finally {
-    console.log('--- 任务执行完毕 ---');
+    console.log('========================================');
   }
 }
 
-// 启动主函数
-main();
+run();
