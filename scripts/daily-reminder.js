@@ -7,19 +7,23 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev';
 
+// 检查环境变量是否存在
+if (!RESEND_API_KEY) {
+  console.error('❌ 致命错误: RESEND_API_KEY 环境变量为空！请检查 GitHub Secret 配置。');
+  process.exit(1);
+}
+
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 const resend = new Resend(RESEND_API_KEY);
 
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
 
-// 获取东八区（北京时间）当天的 YYYY-MM-DD
 function getBeijingTodayStr() {
   const now = new Date();
   const beijingTime = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
   return beijingTime.toISOString().split('T')[0];
 }
 
-// 计算相隔天数（按日期字符串 YYYY-MM-DD 计算纯自然日差）
 function getDaysPassed(dateStr) {
   if (!dateStr) return -1;
   const cleanDateStr = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
@@ -31,8 +35,8 @@ function getDaysPassed(dateStr) {
 async function runReminder() {
   const todayStr = getBeijingTodayStr();
   console.log(`🚀 [${todayStr}] 开始扫描今日到期复习任务...`);
+  console.log(`📧 当前配置的发件人: <${SENDER_EMAIL}>`);
   
-  // 1. 查询所有卡片数据
   const { data: items, error } = await supabase
     .from('knowledge_base')
     .select('*');
@@ -42,29 +46,17 @@ async function runReminder() {
     process.exit(1);
   }
 
-  console.log(`📦 成功从数据库读取到 ${items?.length || 0} 条卡片记录`);
+  console.log(`📦 读取到 ${items?.length || 0} 条卡片记录`);
 
-  if (!items || items.length === 0) {
-    console.log('⚠️ 数据库中没有任何卡片，任务结束。');
-    return;
-  }
-
-  // 2. 逐一比对并打印详细分析
   const userTasksMap = {};
 
   items.forEach((item, index) => {
-    // 兼容可能出现的不同日期字段名 (uploadDate / uploaddate / created_at)
     const itemDate = item.uploadDate || item.uploaddate || item.created_at;
-    const userEmail = item.user_email || item.user_id;
+    const userEmail = item.user_email;
 
-    if (!userEmail || !itemDate) {
-      console.log(`⚠️ 第 ${index + 1} 条记录缺少邮箱或日期，跳过:`, item);
-      return;
-    }
+    if (!userEmail || !itemDate) return;
 
     const daysPassed = getDaysPassed(itemDate);
-    console.log(`🔍 卡片 #${index + 1} [${item.subject || '未命名'}] 上传日期: ${itemDate} -> 距离今天: ${daysPassed} 天 (所属: ${userEmail})`);
-
     let stageNumber = null;
     const stageIndex = MILESTONE_INTERVALS.indexOf(daysPassed);
 
@@ -87,21 +79,20 @@ async function runReminder() {
 
   const userEmails = Object.keys(userTasksMap);
   if (userEmails.length === 0) {
-    console.log('🎉 今日所有用户的卡片均不在复习时间窗口内，任务结束。');
+    console.log('🎉 今日无待复习任务。');
     return;
   }
 
-  // 3. 遍历给有任务的用户发送邮件
   for (const email of userEmails) {
     const tasks = userTasksMap[email];
     const taskListHtml = tasks
       .map((t, idx) => `<li style="margin: 8px 0;"><strong>#${idx + 1} [${t.subject}]</strong> — 第 ${t.stage} 次复习</li>`)
       .join('');
 
-    console.log(`✉️ 正在向 ${email} 发送 ${tasks.length} 个任务的提醒邮件...`);
+    console.log(`✉️ 正在向 ${email} 提交 Resend 发信请求...`);
 
     try {
-      const { data, error: sendErr } = await resend.emails.send({
+      const response = await resend.emails.send({
         from: `复习打卡提醒 <${SENDER_EMAIL}>`,
         to: email,
         subject: `🦉 今日打卡提醒：你有 ${tasks.length} 个复习任务待完成！`,
@@ -117,13 +108,13 @@ async function runReminder() {
         `,
       });
 
-      if (sendErr) {
-        console.error(`❌ Resend 发信失败:`, sendErr);
+      if (response.error) {
+        console.error(`❌ Resend 接口明确返回错误:`, JSON.stringify(response.error, null, 2));
       } else {
-        console.log(`✅ 已成功向 ${email} 发送邮件！邮件 ID:`, data?.id);
+        console.log(`🎉 邮件发送成功！Resend ID: ${response.data?.id}`);
       }
     } catch (err) {
-      console.error(`❌ 发送异常:`, err);
+      console.error(`💥 发送网络/代码异常:`, err);
     }
   }
 }
