@@ -1,330 +1,1163 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
+import { createClient } from '@supabase/supabase-js';
+import emailjs from '@emailjs/browser';
+import { Login } from './Login';
 
-type Subject = '语文' | '数学' | '英语' | '物理' | '化学';
+// ========================================================
+// 🔗 Supabase 配置（带持久化登录）
+// ========================================================
+const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
 
-interface ReviewPhoto {
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: true,
+  },
+});
+
+// ✉️ EmailJS 建议反馈与提醒服务密钥
+const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
+const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
+const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
+
+interface RevisionLog {
+  stage: number | string;
+  imageUrl: string;
+  date: string;
+}
+
+interface KnowledgeItem {
   id: string;
-  subject: Subject;
+  subject: string;
   imageUrl: string;
   uploadDate: string;
+  revisions?: RevisionLog[];
+  user_id?: string;
+  user_email?: string;
 }
 
-interface ReviewTask {
-  photo: ReviewPhoto;
-  stage: 1 | 3 | 5 | 7;
-  completed: boolean;
+interface LeaderboardUser {
+  user_email: string;
+  streak: number;
+  xp: number;
+  isCurrent: boolean;
 }
+
+const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
+const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+
+const TRANSLATIONS = {
+  zh: {
+    home: '主页',
+    leaderboard: '排行榜',
+    profile: '个人中心',
+    uploadTitle: '📸 上传新复习资料',
+    clickUpload: '点击拍照 / 选择初次学习笔记照片',
+    saveBtn: '保存资料并生成阶段复习关卡',
+    todayTasks: '🎯 今日复习关卡',
+    noTasks: '🎉 今天没有需要复习的任务，快去上传新资料吧！',
+    databaseTitle: '📂 资料历史数据库',
+    all: '全部',
+    addSubject: '+ 新增',
+    deleteSet: '删除整套资料',
+    mastered: '✅ 已掌握',
+    challenge: '挑战 ➔',
+    nativeNotice: '🔔 系统原生通知',
+    enableNotice: '开启设备提醒权限',
+    noticeEnabled: '通知权限已开启',
+    logout: '🚪 退出登录',
+    deleteAccount: '⚠️ 注销（删除）账户',
+    deleteConfirm: '警告：注销账户将永久清空您在云端的所有卡片与复习历史记录且无法恢复，确定要注销吗？',
+    rankTitle: '🏆 学习达人排行榜',
+    myStats: '📊 你的学习战绩',
+    customSubTitle: '🏷️ 你的专属科目',
+    langSwitch: '🌐 语言切换 / Language',
+    enterSubject: '输入新自定义科目名称：',
+    reviewNotice: '📸 上传本次复习重写笔记/答题照片 (可选)',
+    completeBtn: '掌握知识点，打卡过关！ 🎉',
+    close: '关闭',
+    totalPhotos: '张笔记',
+    clickToEnlarge: '🔍 点击查看原图',
+    feedbackTitle: '💬 问题反馈与建议',
+    feedbackPlaceholder: '遇到 Bug 或有好的建议？请告诉我们...',
+    submitFeedback: '提交建议发送至邮箱 ✉️',
+    sending: '正在发送...',
+    feedbackSuccess: '🎉 感谢你的反馈！建议已成功发送到开发者的邮箱。',
+    noRankData: '尚无其他活跃用户，快去邀请朋友一起来打卡吧！',
+    initialReview: '初次复习',
+    dayStageText: (stage: number) => `第 ${stage} 次复习`,
+  },
+  en: {
+    home: 'Home',
+    leaderboard: 'Leaderboard',
+    profile: 'Profile',
+    uploadTitle: '📸 Upload New Study Material',
+    clickUpload: 'Click to Take Photo / Choose Initial Notes',
+    saveBtn: 'Save & Generate Review Levels',
+    todayTasks: "🎯 Today's Review Levels",
+    noTasks: '🎉 No review tasks today. Go upload new materials!',
+    databaseTitle: '📂 Study Material Library',
+    all: 'All',
+    addSubject: '+ Add',
+    deleteSet: 'Delete Deck',
+    mastered: '✅ Mastered',
+    challenge: 'Start ➔',
+    nativeNotice: '🔔 System Notification',
+    enableNotice: 'Enable Device Notification',
+    noticeEnabled: 'Notification Enabled',
+    logout: '🚪 Sign Out',
+    deleteAccount: '⚠️ Delete Account Data',
+    deleteConfirm: 'WARNING: This will permanently delete all your cards & study logs from the cloud. Are you sure?',
+    rankTitle: '🏆 Learning Leaderboard',
+    myStats: '📊 Your Learning Stats',
+    customSubTitle: '🏷️ Your Custom Subjects',
+    langSwitch: '🌐 Language / 语言切换',
+    enterSubject: 'Enter new custom subject name:',
+    reviewNotice: '📸 Upload Review Notes Photo (Optional)',
+    completeBtn: 'Mastered & Complete Level! 🎉',
+    close: 'Close',
+    totalPhotos: 'Notes',
+    clickToEnlarge: '🔍 Tap to view fullscreen',
+    feedbackTitle: '💬 Feedback & Suggestions',
+    feedbackPlaceholder: 'Encountered a bug or have ideas? Let us know...',
+    submitFeedback: 'Submit Feedback to Email ✉️',
+    sending: 'Sending...',
+    feedbackSuccess: '🎉 Thank you! Your feedback has been sent to the developer.',
+    noRankData: 'No other active users yet. Invite your friends to join!',
+    initialReview: 'Initial Review',
+    dayStageText: (stage: number) => `Stage ${stage} Review`,
+  }
+};
 
 export default function App() {
-  const [streak, setStreak] = useState<number>(1);
-  const [xp, setXp] = useState<number>(0);
-  const [photos, setPhotos] = useState<ReviewPhoto[]>([]);
-  const [todayTasks, setTodayTasks] = useState<ReviewTask[]>([]);
-  const [currentLevelIndex, setCurrentLevelIndex] = useState<number | null>(null);
-  
-  const [selectedSubject, setSelectedSubject] = useState<Subject>('语文');
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [filterSubject, setFilterSubject] = useState<Subject | '全部'>('全部');
+  const [session, setSession] = useState<any>(null);
+  const [authChecking, setAuthChecking] = useState<boolean>(true);
 
-  const getDaysDiff = (dateStr: string) => {
-    const start = new Date(dateStr);
-    const today = new Date();
-    start.setHours(0, 0, 0, 0);
-    today.setHours(0, 0, 0, 0);
-    const diffTime = today.getTime() - start.getTime();
-    return Math.floor(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  };
+  // 🌐 多语言状态
+  const [lang, setLang] = useState<'zh' | 'en'>(
+    () => (localStorage.getItem('app_lang') as 'zh' | 'en') || 'zh'
+  );
+  const t = TRANSLATIONS[lang];
+
+  const [currentTab, setCurrentTab] = useState<'home' | 'leaderboard' | 'profile'>('home');
+  const [subjects, setSubjects] = useState<string[]>(DEFAULT_SUBJECTS);
+
+  const [streak, setStreak] = useState<number>(1);
+  const [xp, setXp] = useState<number>(20);
+  const [items, setItems] = useState<KnowledgeItem[]>([]);
+  const [completedToday, setCompletedToday] = useState<string[]>([]);
+  
+  const [realLeaderboard, setRealLeaderboard] = useState<LeaderboardUser[]>([]);
+
+  const [selectedSubject, setSelectedSubject] = useState<string>('ALL');
+  const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [reviewNewImage, setReviewNewImage] = useState<string | null>(null);
+
+  // 🔍 全屏大图灯箱状态
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
+
+  const [notificationPermission, setNotificationPermission] = useState<string>(
+    () => ('Notification' in window ? Notification.permission : 'unsupported')
+  );
+
+  const [feedback, setFeedback] = useState('');
+  const [sendingFeedback, setSendingFeedback] = useState(false);
+
+  const [activeModalItem, setActiveModalItem] = useState<{ 
+    item: KnowledgeItem; 
+    stageNumber: number;
+    type: 'review' | 'viewFolder' 
+  } | null>(null);
+
+  const [loading, setLoading] = useState<boolean>(false);
+  const reminderChecked = useRef<boolean>(false);
 
   useEffect(() => {
-    const savedPhotos = localStorage.getItem('review_photos_v3');
-    const savedStreak = localStorage.getItem('review_streak');
-    const savedXp = localStorage.getItem('review_xp');
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthChecking(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setAuthChecking(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (session) {
+      fetchData();
+      fetchCustomSubjects();
+      fetchLeaderboard();
+    }
+  }, [session]);
+
+  const toggleLanguage = () => {
+    const nextLang = lang === 'zh' ? 'en' : 'zh';
+    setLang(nextLang);
+    localStorage.setItem('app_lang', nextLang);
+  };
+
+  function getTodayStr() {
+    return new Date().toISOString().split('T')[0];
+  }
+
+  function getDaysPassed(dateStr: string) {
+    const start = new Date(dateStr).getTime();
+    const today = new Date(getTodayStr()).getTime();
+    return Math.floor((today - start) / (1000 * 60 * 60 * 24));
+  }
+
+  // 🧠 新版智能复习匹配判定
+  const todayTasks = items.flatMap(item => {
+    const daysPassed = getDaysPassed(item.uploadDate);
+    const stageIndex = MILESTONE_INTERVALS.indexOf(daysPassed);
+    if (stageIndex !== -1) {
+      return [{ item, stageNumber: stageIndex + 1 }];
+    }
+
+    if (daysPassed > 25 && (daysPassed - 25) % 30 === 0) {
+      const monthlyCycle = Math.floor((daysPassed - 25) / 30);
+      return [{ item, stageNumber: 5 + monthlyCycle }];
+    }
+
+    return [];
+  });
+
+  // ✉️ 方案 A：静默检测并发送打卡提醒邮件（每日仅限一次）
+  useEffect(() => {
+    if (session?.user?.email && todayTasks.length > 0 && !reminderChecked.current) {
+      reminderChecked.current = true;
+      const todayStr = getTodayStr();
+      const reminderKey = `reminder_sent_${session.user.id}_${todayStr}`;
+
+      // 仅在今天尚未发送过提醒时触发
+      if (!localStorage.getItem(reminderKey)) {
+        const taskSummary = todayTasks
+          .map((t, idx) => `${idx + 1}. [${t.item.subject}] - 第 ${t.stageNumber} 次复习`)
+          .join('\n');
+
+        emailjs.send(
+          EMAILJS_SERVICE_ID,
+          EMAILJS_TEMPLATE_ID,
+          {
+            user_email: session.user.email,
+            task_count: todayTasks.length,
+            message: `【1357打卡提醒】你今天有 ${todayTasks.length} 个复习任务待完成：\n${taskSummary}\n\n加油，保持连胜！`,
+            submit_time: new Date().toLocaleString(),
+          },
+          EMAILJS_PUBLIC_KEY
+        ).then(() => {
+          localStorage.setItem(reminderKey, 'true');
+          console.log('✅ 今日打卡邮件提醒已静默发送至邮箱');
+        }).catch((err) => {
+          console.warn('⚠️ 提醒邮件发送受阻:', err);
+        });
+      }
+    }
+  }, [items, session]);
+
+  async function fetchCustomSubjects() {
+    const { data, error } = await supabase
+      .from('custom_subjects')
+      .select('name')
+      .order('created_at', { ascending: true });
+
+    if (!error && data) {
+      const customNames = data.map(item => item.name);
+      const combined = Array.from(new Set([...DEFAULT_SUBJECTS, ...customNames]));
+      setSubjects(combined);
+    }
+  }
+
+  const handleAddCustomSubject = async () => {
+    const newSub = prompt(t.enterSubject);
+    if (newSub && newSub.trim() && session) {
+      const trimmed = newSub.trim();
+      if (!subjects.includes(trimmed)) {
+        const { error } = await supabase
+          .from('custom_subjects')
+          .insert([{ name: trimmed, user_id: session.user.id }]);
+
+        if (!error) {
+          setSubjects([...subjects, trimmed]);
+          setSelectedUploadSubject(trimmed);
+        } else {
+          alert(`添加失败：${error.message}`);
+        }
+      }
+    }
+  };
+
+  async function fetchData() {
+    if (!session?.user?.id) return;
+
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('knowledge_base')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false });
+
+    if (!error && data) {
+      setItems(data);
+    }
+
+    const savedStreak = localStorage.getItem(`checkin_streak_${session.user.id}`);
+    const savedXp = localStorage.getItem(`checkin_xp_${session.user.id}`);
+    const savedCompleted = localStorage.getItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
 
     if (savedStreak) setStreak(Number(savedStreak));
     if (savedXp) setXp(Number(savedXp));
+    if (savedCompleted) setCompletedToday(JSON.parse(savedCompleted));
+    setLoading(false);
+  }
 
-    let loadedPhotos: ReviewPhoto[] = [];
-    if (savedPhotos) {
-      loadedPhotos = JSON.parse(savedPhotos);
-      setPhotos(loadedPhotos);
+  async function fetchLeaderboard() {
+    const { data, error } = await supabase
+      .from('knowledge_base')
+      .select('user_id, user_email');
+
+    if (!error && data) {
+      const userMap: { [email: string]: { count: number; userId: string } } = {};
+
+      data.forEach(item => {
+        if (item.user_email) {
+          if (!userMap[item.user_email]) {
+            userMap[item.user_email] = { count: 0, userId: item.user_id };
+          }
+          userMap[item.user_email].count += 1;
+        }
+      });
+
+      if (session?.user?.email && !userMap[session.user.email]) {
+        userMap[session.user.email] = { count: items.length, userId: session.user.id };
+      }
+
+      const boardList: LeaderboardUser[] = Object.keys(userMap).map(email => {
+        const isCurrent = email === session?.user?.email;
+        const count = userMap[email].count;
+        const userStreak = isCurrent ? streak : Math.max(1, count);
+        const userXp = isCurrent ? xp : count * 20;
+
+        return {
+          user_email: email,
+          streak: userStreak,
+          xp: userXp,
+          isCurrent,
+        };
+      });
+
+      boardList.sort((a, b) => b.xp - a.xp || b.streak - a.streak);
+      setRealLeaderboard(boardList);
+    }
+  }
+
+  const requestNativeNotification = () => {
+    if (!('Notification' in window)) {
+      alert(lang === 'zh' ? '当前浏览器不支持系统原生通知' : 'Notifications not supported');
+      return;
     }
 
-    generateTodayTasks(loadedPhotos);
-  }, []);
-
-  const generateTodayTasks = (allPhotos: ReviewPhoto[]) => {
-    const tasks: ReviewTask[] = [];
-    allPhotos.forEach((photo) => {
-      const day = getDaysDiff(photo.uploadDate);
-      if (day === 1 || day === 3 || day === 5 || day === 7) {
-        tasks.push({
-          photo,
-          stage: day as 1 | 3 | 5 | 7,
-          completed: false,
+    Notification.requestPermission().then((perm) => {
+      setNotificationPermission(perm);
+      if (perm === 'granted') {
+        new Notification(lang === 'zh' ? '🦉 知识复习打卡' : '🦉 Study Check-in', {
+          body: lang === 'zh' ? '已成功开启原生通知提醒！' : 'Native notification enabled!',
         });
       }
     });
-    setTodayTasks(tasks);
   };
 
-  const handleUploadPhoto = () => {
-    if (!selectedImage) return;
+  const handleSendFeedback = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!feedback.trim()) return;
 
-    const todayStr = new Date().toISOString().split('T')[0];
-    const newPhoto: ReviewPhoto = {
-      id: Date.now().toString(),
-      subject: selectedSubject,
-      imageUrl: selectedImage,
-      uploadDate: todayStr,
-    };
-
-    const updatedPhotos = [newPhoto, ...photos];
-    setPhotos(updatedPhotos);
-    localStorage.setItem('review_photos_v3', JSON.stringify(updatedPhotos));
-
-    setSelectedImage(null);
-    setIsUploading(false);
-    generateTodayTasks(updatedPhotos);
-  };
-
-  const handleCompleteLevel = (index: number) => {
-    const updatedTasks = [...todayTasks];
-    updatedTasks[index].completed = true;
-    setTodayTasks(updatedTasks);
-
+    setSendingFeedback(true);
     try {
-      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-      const osc = audioCtx.createOscillator();
-      osc.frequency.setValueAtTime(587.33, audioCtx.currentTime);
-      osc.connect(audioCtx.destination);
-      osc.start();
-      osc.stop(audioCtx.currentTime + 0.15);
-    } catch (e) {}
+      await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+          user_email: session?.user?.email || 'Anonymous',
+          message: feedback,
+          submit_time: new Date().toLocaleString(),
+        },
+        EMAILJS_PUBLIC_KEY
+      );
 
-    setCurrentLevelIndex(null);
-
-    const allDone = updatedTasks.every((t) => t.completed);
-    if (allDone) {
-      confetti({ particleCount: 120, spread: 80, origin: { y: 0.6 } });
-      const newXp = xp + updatedTasks.length * 10;
-      const newStreak = streak + 1;
-      setXp(newXp);
-      setStreak(newStreak);
-      localStorage.setItem('review_xp', newXp.toString());
-      localStorage.setItem('review_streak', newStreak.toString());
+      alert(t.feedbackSuccess);
+      setFeedback('');
+    } catch (err: any) {
+      console.error(err);
+      alert(lang === 'zh' ? `发送失败: ${err.text || '请检查网络/配置'}` : 'Send failed, please try again.');
+    } finally {
+      setSendingFeedback(false);
     }
   };
 
-  const filteredPhotos = filterSubject === '全部'
-    ? photos
-    : photos.filter((p) => p.subject === filterSubject);
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setItems([]);
+    setSubjects(DEFAULT_SUBJECTS);
+  };
+
+  const handleDeleteAccount = async () => {
+    if (window.confirm(t.deleteConfirm)) {
+      if (session?.user?.id) {
+        setLoading(true);
+        try {
+          const { error } = await supabase.rpc('delete_user_account');
+
+          if (error) {
+            await supabase.from('knowledge_base').delete().eq('user_id', session.user.id);
+            await supabase.from('custom_subjects').delete().eq('user_id', session.user.id);
+          } else {
+            await supabase.from('custom_subjects').delete().eq('user_id', session.user.id);
+          }
+
+          localStorage.removeItem(`checkin_streak_${session.user.id}`);
+          localStorage.removeItem(`checkin_xp_${session.user.id}`);
+          
+          alert(
+            lang === 'zh'
+              ? '🎉 账号与个人数据已彻底销毁！'
+              : '🎉 Account & data permanently deleted!'
+          );
+          
+          handleLogout();
+        } catch (err: any) {
+          alert(`注销出错：${err.message || '网络异常'}`);
+        } finally {
+          setLoading(false);
+        }
+      }
+    }
+  };
+
+  const compressImage = (file: File, callback: (base64: string) => void) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const MAX_WIDTH = 1200;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > MAX_WIDTH) {
+          height = Math.round((height * MAX_WIDTH) / width);
+          width = MAX_WIDTH;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        callback(compressedDataUrl);
+      };
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) compressImage(file, setPreviewImage);
+  };
+
+  const handleReviewImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) compressImage(file, setReviewNewImage);
+  };
+
+  const handleSaveNewKnowledge = async () => {
+    if (!previewImage || !session) return;
+
+    const newItemData = {
+      subject: selectedUploadSubject,
+      imageUrl: previewImage,
+      uploadDate: getTodayStr(),
+      revisions: [],
+      user_id: session.user.id,
+      user_email: session.user.email
+    };
+
+    const { data, error } = await supabase
+      .from('knowledge_base')
+      .insert([newItemData])
+      .select();
+
+    if (!error && data) {
+      setItems([data[0], ...items]);
+      setPreviewImage(null);
+      confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
+      fetchLeaderboard();
+    } else {
+      alert(`Error: ${error?.message}`);
+    }
+  };
+
+  const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber?: number) => {
+    if (completedToday.includes(taskId)) return;
+
+    let updatedRevisions = item.revisions ? [...item.revisions] : [];
+    if (reviewNewImage && stageNumber) {
+      updatedRevisions.push({
+        stage: stageNumber,
+        imageUrl: reviewNewImage,
+        date: getTodayStr()
+      });
+    }
+
+    const updatedItems = items.map(i => {
+      if (i.id === item.id) {
+        return { ...i, revisions: updatedRevisions };
+      }
+      return i;
+    });
+    setItems(updatedItems);
+
+    await supabase
+      .from('knowledge_base')
+      .update({ revisions: updatedRevisions })
+      .eq('id', item.id);
+
+    const newCompleted = [...completedToday, taskId];
+    setCompletedToday(newCompleted);
+    localStorage.setItem(`checkin_completed_${session?.user?.id}_${getTodayStr()}`, JSON.stringify(newCompleted));
+
+    const newXp = xp + 20;
+    setXp(newXp);
+    localStorage.setItem(`checkin_xp_${session?.user?.id}`, newXp.toString());
+
+    if (newCompleted.length === todayTasks.length) {
+      const newStreak = streak + 1;
+      setStreak(newStreak);
+      localStorage.setItem(`checkin_streak_${session?.user?.id}`, newStreak.toString());
+      confetti({ particleCount: 120, spread: 100, origin: { y: 0.6 } });
+    } else {
+      confetti({ particleCount: 40, spread: 50 });
+    }
+
+    setReviewNewImage(null);
+    setActiveModalItem(null);
+    fetchLeaderboard();
+  };
+
+  const handleDeleteItem = async (id: string) => {
+    if (window.confirm('确定要删除这套资料吗？')) {
+      await supabase.from('knowledge_base').delete().eq('id', id);
+      const filtered = items.filter(i => i.id !== id);
+      setItems(filtered);
+      setActiveModalItem(null);
+      fetchLeaderboard();
+    }
+  };
+
+  const filteredDatabaseItems = selectedSubject === 'ALL'
+    ? items
+    : items.filter(item => item.subject === selectedSubject);
+
+  if (authChecking) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center text-xs animate-pulse font-sans">
+        🦉 正在同步云端数据...
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <Login onSuccess={() => {}} lang={lang} onToggleLang={toggleLanguage} />;
+  }
 
   return (
-    <div className="min-h-screen bg-gray-100 text-gray-800 font-sans pb-12 select-none">
-      <header className="bg-white border-b-2 border-gray-200 sticky top-0 z-10 px-4 py-3 shadow-sm">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-1 bg-orange-50 px-3 py-1 rounded-xl border border-orange-200">
-            <span className="text-xl">🔥</span>
-            <span className="font-extrabold text-orange-500">{streak} 天</span>
+    <div className="min-h-screen bg-slate-100 text-slate-800 pb-24 font-sans">
+      {/* 顶部状态栏 */}
+      <header className="sticky top-0 z-20 bg-white border-b-2 border-slate-200 px-4 py-3 flex justify-between items-center shadow-sm">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 font-extrabold text-orange-500 text-lg">
+            🔥 <span>{streak}</span>
           </div>
-
-          <div className="flex items-center space-x-1 bg-yellow-50 px-3 py-1 rounded-xl border border-yellow-200">
-            <span className="text-xl">⚡</span>
-            <span className="font-extrabold text-yellow-600">{xp} XP</span>
+          <div className="flex items-center gap-1 font-extrabold text-yellow-500 text-lg">
+            ⚡ <span>{xp} XP</span>
           </div>
+        </div>
 
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsUploading(true)}
-            className="bg-green-500 hover:bg-green-600 text-white font-extrabold text-xs px-3 py-2 rounded-xl shadow border-b-2 border-green-700 active:translate-y-0.5"
+            onClick={toggleLanguage}
+            className="text-xs bg-slate-100 hover:bg-slate-200 font-extrabold px-2.5 py-1 rounded-xl transition-all border border-slate-300"
           >
-            + 上传资料
+            🌐 {lang === 'zh' ? 'EN' : '中文'}
           </button>
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-4 mt-6 space-y-6">
-        {isUploading && (
-          <div className="bg-white rounded-3xl p-6 shadow-lg border-2 border-green-500 space-y-4">
-            <h3 className="font-extrabold text-gray-700 text-center">📷 选择学科并上传资料</h3>
-            
-            <div className="flex justify-between gap-1">
-              {(['语文', '数学', '英语', '物理', '化学'] as Subject[]).map((sub) => (
+      {/* 1. 🏠 主页 */}
+      {currentTab === 'home' && (
+        <main className="max-w-md mx-auto p-4 space-y-6">
+          {loading && (
+            <div className="text-center py-2 text-xs text-indigo-500 font-bold animate-pulse">
+              🔄 正在同步云端资料...
+            </div>
+          )}
+
+          {/* 📸 上传新资料 */}
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+            <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
+              {t.uploadTitle}
+            </h2>
+
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {subjects.map(sub => (
+                <button
+                  key={sub}
+                  onClick={() => setSelectedUploadSubject(sub)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+                    selectedUploadSubject === sub
+                      ? 'bg-indigo-500 text-white shadow-md'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {sub}
+                </button>
+              ))}
+              <button
+                onClick={handleAddCustomSubject}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 shrink-0 border border-indigo-200"
+              >
+                {t.addSubject}
+              </button>
+            </div>
+
+            <label className="block border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 rounded-2xl p-4 text-center cursor-pointer transition-all">
+              <span className="text-sm font-bold text-indigo-600">{t.clickUpload}</span>
+              <input type="file" accept="image/*" onChange={handleImageUpload} className="hidden" />
+            </label>
+
+            {previewImage && (
+              <div className="space-y-3">
+                <div 
+                  onClick={() => setFullScreenImage(previewImage)}
+                  className="h-36 w-full overflow-hidden rounded-2xl border bg-slate-100 cursor-pointer relative group"
+                >
+                  <img src={previewImage} alt="Preview" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                  <div className="absolute bottom-2 right-2 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-lg backdrop-blur-sm">
+                    {t.clickToEnlarge}
+                  </div>
+                </div>
+                <button
+                  onClick={handleSaveNewKnowledge}
+                  className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-extrabold rounded-2xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all shadow-lg"
+                >
+                  {t.saveBtn}
+                </button>
+              </div>
+            )}
+          </section>
+
+          {/* 🎯 今日复习关卡 */}
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold text-lg text-slate-700">{t.todayTasks}</h2>
+              <span className="text-xs bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full font-bold">
+                {todayTasks.length} 关卡
+              </span>
+            </div>
+
+            {todayTasks.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm font-medium">
+                {t.noTasks}
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-3 py-1">
+                {todayTasks.map(({ item, stageNumber }, index) => {
+                  const taskId = `${item.id}_stage${stageNumber}`;
+                  const isDone = completedToday.includes(taskId);
+
+                  return (
+                    <button
+                      key={taskId}
+                      onClick={() => {
+                        setReviewNewImage(null);
+                        setActiveModalItem({ item, stageNumber, type: 'review' });
+                      }}
+                      className={`w-full p-4 rounded-2xl font-extrabold flex justify-between items-center transition-all ${
+                        isDone
+                          ? 'bg-slate-100 text-slate-400 border-2 border-slate-200'
+                          : 'bg-green-500 hover:bg-green-600 text-white border-b-4 border-green-700 active:border-b-0 active:translate-y-1 shadow-md'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="bg-white/20 px-2.5 py-1 rounded-lg text-xs">
+                          #{index + 1}
+                        </span>
+                        <span>
+                          [{item.subject}] {stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}
+                        </span>
+                      </div>
+                      <span>{isDone ? t.mastered : t.challenge}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          {/* 📂 资料历史数据库 */}
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
+                {t.databaseTitle}
+              </h2>
+              <span className="text-xs text-slate-400 font-bold">{items.length} 套</span>
+            </div>
+
+            <div className="flex gap-1.5 overflow-x-auto pb-1">
+              <button
+                onClick={() => setSelectedSubject('ALL')}
+                className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
+                  selectedSubject === 'ALL'
+                    ? 'bg-slate-800 text-white'
+                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                }`}
+              >
+                {t.all}
+              </button>
+              {subjects.map(sub => (
                 <button
                   key={sub}
                   onClick={() => setSelectedSubject(sub)}
-                  className={
+                  className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
                     selectedSubject === sub
-                      ? "flex-1 py-1.5 rounded-xl text-xs font-black bg-green-500 text-white shadow"
-                      : "flex-1 py-1.5 rounded-xl text-xs font-black bg-gray-100 text-gray-600 hover:bg-gray-200"
-                  }
+                      ? 'bg-slate-800 text-white'
+                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}
                 >
                   {sub}
                 </button>
               ))}
             </div>
 
-            <div className="border-2 border-dashed border-gray-300 rounded-2xl p-4 text-center bg-gray-50">
-              {selectedImage ? (
-                <img src={selectedImage} alt="预览" className="max-h-48 mx-auto rounded-xl" />
+            {filteredDatabaseItems.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs">暂无资料</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                {filteredDatabaseItems.map(item => {
+                  const totalPhotos = 1 + (item.revisions ? item.revisions.length : 0);
+                  return (
+                    <div 
+                      key={item.id} 
+                      className="bg-slate-50 rounded-2xl p-2 border border-slate-200 flex flex-col space-y-2 group overflow-hidden"
+                    >
+                      <div 
+                        onClick={() => setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' })}
+                        className="relative cursor-pointer overflow-hidden rounded-xl bg-slate-200 h-28 w-full shrink-0"
+                      >
+                        <img 
+                          src={item.imageUrl} 
+                          alt="Cover" 
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 block" 
+                        />
+                        <div className="absolute top-2 right-2 bg-black/70 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full backdrop-blur-sm">
+                          📁 {totalPhotos} {t.totalPhotos}
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center px-1">
+                        <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
+                          {item.subject}
+                        </span>
+                        <span className="text-[10px] text-slate-400">{item.uploadDate}</span>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeleteItem(item.id)}
+                        className="text-[10px] text-red-400 hover:text-red-600 text-right px-1 pt-0.5"
+                      >
+                        {t.deleteSet}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        </main>
+      )}
+
+      {/* 2. 🏆 排行榜 */}
+      {currentTab === 'leaderboard' && (
+        <main className="max-w-md mx-auto p-4 space-y-6">
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+            <h2 className="font-extrabold text-xl text-slate-800 text-center flex items-center justify-center gap-2">
+              {t.rankTitle}
+            </h2>
+
+            <div className="bg-gradient-to-r from-orange-400 to-amber-500 text-white rounded-2xl p-4 flex justify-between items-center shadow-lg">
+              <div>
+                <p className="text-xs font-bold opacity-80">{t.myStats}</p>
+                <p className="text-sm font-extrabold truncate max-w-[180px]">
+                  {session?.user?.email}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-right">
+                <div>
+                  <p className="text-xs opacity-80">Streak</p>
+                  <p className="text-lg font-black">🔥 {streak}</p>
+                </div>
+                <div>
+                  <p className="text-xs opacity-80">XP</p>
+                  <p className="text-lg font-black">⚡ {xp}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              {realLeaderboard.length === 0 ? (
+                <div className="text-center py-6 text-slate-400 text-xs">
+                  {t.noRankData}
+                </div>
               ) : (
-                <label className="cursor-pointer block py-6">
-                  <span className="text-4xl">📸</span>
-                  <p className="text-xs text-gray-500 mt-2 font-bold">
-                    点击上传 [{selectedSubject}] 照片资料
-                  </p>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onloadend = () => setSelectedImage(reader.result as string);
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                  />
-                </label>
+                realLeaderboard.map((user, idx) => {
+                  const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
+                  return (
+                    <div 
+                      key={user.user_email} 
+                      className={`flex justify-between items-center p-3 rounded-2xl border transition-all ${
+                        user.isCurrent 
+                          ? 'bg-amber-50 border-2 border-amber-300 shadow-sm' 
+                          : 'bg-slate-50 border-slate-200'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg font-bold">{medal}</span>
+                        <div>
+                          <p className={`font-extrabold text-xs ${user.isCurrent ? 'text-amber-800' : 'text-slate-700'}`}>
+                            {user.user_email?.split('@')[0]} {user.isCurrent ? '(You)' : ''}
+                          </p>
+                          <p className="text-[10px] text-slate-400">
+                            {idx === 0 ? 'Top Scholar' : `Rank #${idx + 1}`}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="font-black text-amber-600 text-xs">
+                        🔥 {user.streak} 天 · ⚡ {user.xp} XP
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
+          </section>
+        </main>
+      )}
 
-            <div className="flex space-x-2">
-              <button
-                onClick={() => {
-                  setIsUploading(false);
-                  setSelectedImage(null);
-                }}
-                className="w-1/2 py-2 bg-gray-200 rounded-xl font-bold text-gray-600 text-sm"
-              >
-                取消
-              </button>
-              <button
-                onClick={handleUploadPhoto}
-                disabled={!selectedImage}
-                className={
-                  selectedImage
-                    ? "w-1/2 py-2 rounded-xl font-bold text-sm text-white bg-green-500 hover:bg-green-600"
-                    : "w-1/2 py-2 rounded-xl font-bold text-sm text-white bg-gray-300"
-                }
-              >
-                存入 [{selectedSubject}]
-              </button>
-            </div>
-          </div>
-        )}
-
-        <div className="bg-white rounded-3xl p-6 shadow-md border-2 border-gray-200 space-y-6">
-          <div className="text-center">
-            <h2 className="text-xl font-black text-gray-700">🗺️ 全学科复习关卡路线</h2>
-            <p className="text-xs text-gray-400 mt-1">
-              {todayTasks.length > 0
-                ? "今天共有 " + todayTasks.length + " 个跨学科关卡需要打卡"
-                : "今天没有需要复习的照片，点击右上角上传新资料吧！"}
-            </p>
-          </div>
-
-          <div className="flex flex-col items-center space-y-6 py-2">
-            {todayTasks.length === 0 ? (
-              <div className="text-center py-8 text-gray-400 text-sm">
-                🎉 太棒了，今日所有学科的复习任务已全部通关！
+      {/* 3. 👤 个人中心 */}
+      {currentTab === 'profile' && (
+        <main className="max-w-md mx-auto p-4 space-y-6">
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-5">
+            <div className="text-center space-y-2">
+              <div className="w-20 h-20 bg-green-500 rounded-3xl mx-auto flex items-center justify-center text-4xl shadow-lg border-b-4 border-green-700 pt-1">
+                🦉
               </div>
-            ) : (
-              todayTasks.map((task, index) => (
-                <div key={index} className="flex flex-col items-center space-y-2">
-                  <button
-                    onClick={() => setCurrentLevelIndex(index)}
-                    disabled={task.completed}
-                    className={
-                      task.completed
-                        ? "w-20 h-20 rounded-full font-black text-white text-lg flex flex-col items-center justify-center transition-all shadow-lg border-b-4 bg-gray-300 border-gray-400 cursor-not-allowed scale-95"
-                        : "w-20 h-20 rounded-full font-black text-white text-lg flex flex-col items-center justify-center transition-all shadow-lg border-b-4 bg-green-500 hover:bg-green-600 border-green-700 active:translate-y-1 active:border-b-0"
-                    }
-                  >
-                    <span className="text-xl">{task.completed ? "✅" : "🎯"}</span>
-                    <span className="text-xs font-bold">第 {index + 1} 关</span>
-                  </button>
-                  <span className="text-xs font-bold text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full border">
-                    [{task.photo.subject}] 第 {task.stage} 天复习
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+              <h2 className="font-extrabold text-lg text-slate-800">
+                {session?.user?.email}
+              </h2>
+              <span className="inline-block bg-green-100 text-green-700 text-xs px-3 py-1 rounded-full font-bold">
+                PRO 学习者
+              </span>
+            </div>
 
-        {currentLevelIndex !== null && (
-          <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl p-6 max-w-sm w-full space-y-4 shadow-2xl">
-              <div className="flex justify-between items-center border-b pb-2">
-                <span className="font-extrabold text-gray-700 flex items-center gap-1">
-                  [{todayTasks[currentLevelIndex].photo.subject}] 第 {currentLevelIndex + 1} 关（第 {todayTasks[currentLevelIndex].stage} 天复习）
-                </span>
+            <div className="space-y-3 pt-2 border-t">
+              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
+                <span className="text-xs font-bold text-slate-700">{t.langSwitch}</span>
                 <button
-                  onClick={() => setCurrentLevelIndex(null)}
-                  className="text-gray-400 hover:text-gray-600 font-bold"
+                  onClick={toggleLanguage}
+                  className="text-xs bg-indigo-500 text-white font-extrabold px-3 py-1.5 rounded-xl shadow-sm"
                 >
-                  ✕
+                  {lang === 'zh' ? '中文 ➔ EN' : 'EN ➔ 中文'}
                 </button>
               </div>
 
-              <div className="rounded-2xl overflow-hidden border-2 border-gray-200 max-h-72 bg-black flex items-center justify-center">
-                <img
-                  src={todayTasks[currentLevelIndex].photo.imageUrl}
-                  alt="复习内容"
-                  className="max-h-72 w-auto object-contain"
-                />
+              <div className="p-3 bg-slate-50 rounded-2xl border space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-bold text-slate-700">{t.customSubTitle}</span>
+                  <button
+                    onClick={handleAddCustomSubject}
+                    className="text-xs bg-green-500 text-white font-extrabold px-2.5 py-1 rounded-xl"
+                  >
+                    {t.addSubject}
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {subjects.map(s => (
+                    <span key={s} className="bg-white px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 border">
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-2xl border flex justify-between items-center">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">{t.nativeNotice}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {notificationPermission === 'granted' ? t.noticeEnabled : '开启设备提醒权限'}
+                  </p>
+                </div>
+                <button
+                  onClick={requestNativeNotification}
+                  disabled={notificationPermission === 'granted'}
+                  className={`text-xs font-extrabold px-3 py-1.5 rounded-xl border transition-all ${
+                    notificationPermission === 'granted'
+                      ? 'bg-green-100 text-green-700 border-green-200'
+                      : 'bg-indigo-500 text-white border-indigo-600 hover:bg-indigo-600'
+                  }`}
+                >
+                  {notificationPermission === 'granted' ? '✅ 已开启' : t.enableNotice}
+                </button>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-2xl border space-y-2">
+                <span className="text-xs font-bold text-slate-700">{t.feedbackTitle}</span>
+                <form onSubmit={handleSendFeedback} className="space-y-2">
+                  <textarea
+                    rows={3}
+                    placeholder={t.feedbackPlaceholder}
+                    value={feedback}
+                    onChange={(e) => setFeedback(e.target.value)}
+                    className="w-full p-2.5 rounded-xl bg-white border text-xs text-slate-800 focus:outline-none focus:border-indigo-500 transition-all resize-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={sendingFeedback}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md disabled:opacity-50"
+                  >
+                    {sendingFeedback ? t.sending : t.submitFeedback}
+                  </button>
+                </form>
               </div>
 
               <button
-                onClick={() => handleCompleteLevel(currentLevelIndex)}
-                className="w-full py-3.5 bg-green-500 hover:bg-green-600 text-white font-black rounded-2xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 shadow-md text-base"
+                onClick={handleLogout}
+                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-2xl border border-slate-300 transition-all text-xs"
               >
-                我已经掌握，通关！🎉
+                {t.logout}
+              </button>
+
+              <div className="pt-2">
+                <button
+                  onClick={handleDeleteAccount}
+                  className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 font-extrabold rounded-2xl border border-red-200 transition-all text-xs"
+                >
+                  {t.deleteAccount}
+                </button>
+              </div>
+            </div>
+          </section>
+        </main>
+      )}
+
+      {/* 📌 底部固定 Navigation Bar */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t-2 border-slate-200 px-6 py-2 shadow-2xl max-w-md mx-auto flex justify-around items-center">
+        <button
+          onClick={() => setCurrentTab('home')}
+          className={`flex flex-col items-center gap-1 transition-all ${
+            currentTab === 'home' ? 'text-green-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          }`}
+        >
+          <span className="text-2xl">🏠</span>
+          <span className="text-[10px]">{t.home}</span>
+        </button>
+
+        <button
+          onClick={() => setCurrentTab('leaderboard')}
+          className={`flex flex-col items-center gap-1 transition-all ${
+            currentTab === 'leaderboard' ? 'text-amber-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          }`}
+        >
+          <span className="text-2xl">🏆</span>
+          <span className="text-[10px]">{t.leaderboard}</span>
+        </button>
+
+        <button
+          onClick={() => setCurrentTab('profile')}
+          className={`flex flex-col items-center gap-1 transition-all ${
+            currentTab === 'profile' ? 'text-indigo-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          }`}
+        >
+          <span className="text-2xl">👤</span>
+          <span className="text-[10px]">{t.profile}</span>
+        </button>
+      </nav>
+
+      {/* Modal 业务弹窗 */}
+      {activeModalItem && (
+        <div className="fixed inset-0 z-40 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative">
+            <div className="flex justify-between items-center">
+              <span className="font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl text-xs">
+                {activeModalItem.item.subject} · {activeModalItem.stageNumber === 1 ? t.initialReview : t.dayStageText(activeModalItem.stageNumber)}
+              </span>
+              <button
+                onClick={() => {
+                  setActiveModalItem(null);
+                  setReviewNewImage(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center"
+              >
+                ✕
               </button>
             </div>
-          </div>
-        )}
 
-        <div className="bg-white rounded-3xl p-5 shadow-sm border-2 border-gray-200 space-y-3">
-          <div className="flex justify-between items-center">
-            <h3 className="font-bold text-gray-700 text-sm">📚 知识库照片 ({filteredPhotos.length})</h3>
-            <select
-              value={filterSubject}
-              onChange={(e) => setFilterSubject(e.target.value as any)}
-              className="text-xs font-bold border rounded-lg px-2 py-1 bg-gray-50"
-            >
-              <option value="全部">全部学科</option>
-              <option value="语文">语文</option>
-              <option value="数学">数学</option>
-              <option value="英语">英语</option>
-              <option value="物理">物理</option>
-              <option value="化学">化学</option>
-            </select>
-          </div>
-
-          <div className="flex space-x-2 overflow-x-auto pb-2">
-            {filteredPhotos.length === 0 ? (
-              <span className="text-xs text-gray-400 py-2">暂无该学科的照片资料</span>
-            ) : (
-              filteredPhotos.map((p) => (
-                <div key={p.id} className="relative flex-shrink-0">
+            {/* 复习挑战弹窗 */}
+            {activeModalItem.type === 'review' && (
+              <div className="space-y-4">
+                <div 
+                  onClick={() => setFullScreenImage(activeModalItem.item.imageUrl)}
+                  className="max-h-[45vh] overflow-hidden rounded-2xl bg-slate-900 flex items-center justify-center p-1 cursor-pointer group relative"
+                >
                   <img
-                    src={p.imageUrl}
-                    alt="thumb"
-                    className="w-16 h-16 object-cover rounded-xl border border-gray-200"
+                    src={activeModalItem.item.imageUrl}
+                    alt="Original"
+                    className="w-full h-auto object-contain rounded-xl group-hover:scale-102 transition-transform"
                   />
-                  <span className="absolute bottom-0 right-0 bg-black/60 text-white text-[10px] px-1 rounded-br-xl rounded-tl-md font-bold">
-                    {p.subject}
-                  </span>
+                  <div className="absolute bottom-2 bg-black/70 text-white text-[11px] px-3 py-1 rounded-full font-bold backdrop-blur-md opacity-90">
+                    {t.clickToEnlarge}
+                  </div>
                 </div>
-              ))
+
+                <div className="space-y-2 border-t pt-3">
+                  <label className="block border-2 border-dashed border-green-300 hover:border-green-500 bg-green-50/50 rounded-2xl p-2.5 text-center cursor-pointer transition-all">
+                    <span className="text-xs font-bold text-green-700">
+                      {t.reviewNotice}
+                    </span>
+                    <input type="file" accept="image/*" onChange={handleReviewImageUpload} className="hidden" />
+                  </label>
+
+                  {reviewNewImage && (
+                    <div 
+                      onClick={() => setFullScreenImage(reviewNewImage)}
+                      className="relative h-20 w-full overflow-hidden rounded-xl border bg-slate-100 cursor-pointer group"
+                    >
+                      <img src={reviewNewImage} alt="New note" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm">
+                        {t.clickToEnlarge}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => handleCompleteTask(
+                    `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`,
+                    activeModalItem.item,
+                    activeModalItem.stageNumber
+                  )}
+                  className="w-full py-3.5 bg-green-500 hover:bg-green-600 text-white font-extrabold rounded-2xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all shadow-lg"
+                >
+                  {t.completeBtn}
+                </button>
+              </div>
+            )}
+
+            {/* 资料库相册弹窗 */}
+            {activeModalItem.type === 'viewFolder' && (
+              <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                <div className="bg-slate-50 rounded-2xl p-3 border space-y-2">
+                  <div className="flex justify-between text-xs text-slate-500 font-bold">
+                    <span>📌 原始学习笔记</span>
+                    <span>{activeModalItem.item.uploadDate}</span>
+                  </div>
+                  <div 
+                    onClick={() => setFullScreenImage(activeModalItem.item.imageUrl)}
+                    className="relative cursor-pointer group rounded-xl overflow-hidden bg-slate-900"
+                  >
+                    <img
+                      src={activeModalItem.item.imageUrl}
+                      alt="Initial"
+                      className="w-full h-auto max-h-48 object-contain rounded-xl group-hover:scale-102 transition-transform"
+                    />
+                    <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
+                      {t.clickToEnlarge}
+                    </div>
+                  </div>
+                </div>
+
+                {activeModalItem.item.revisions && activeModalItem.item.revisions.length > 0 && (
+                  activeModalItem.item.revisions.map((rev, idx) => (
+                    <div key={idx} className="bg-indigo-50/60 rounded-2xl p-3 border border-indigo-100 space-y-2">
+                      <div className="flex justify-between text-xs text-indigo-600 font-bold">
+                        <span>✏️ 第 {rev.stage} 次复习重写笔记</span>
+                        <span>{rev.date}</span>
+                      </div>
+                      <div 
+                        onClick={() => setFullScreenImage(rev.imageUrl)}
+                        className="relative cursor-pointer group rounded-xl overflow-hidden bg-slate-900"
+                      >
+                        <img
+                          src={rev.imageUrl}
+                          alt={`Stage ${rev.stage}`}
+                          className="w-full h-auto max-h-48 object-contain rounded-xl group-hover:scale-102 transition-transform"
+                        />
+                        <div className="absolute bottom-2 right-2 bg-black/70 text-white text-[10px] font-bold px-2.5 py-1 rounded-full backdrop-blur-sm">
+                          {t.clickToEnlarge}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+
+                <button
+                  onClick={() => setActiveModalItem(null)}
+                  className="w-full py-2.5 bg-slate-800 text-white font-bold rounded-2xl text-xs"
+                >
+                  {t.close}
+                </button>
+              </div>
             )}
           </div>
         </div>
-      </main>
+      )}
+
+      {/* 🔍 全屏大图沉浸式灯箱 */}
+      {fullScreenImage && (
+        <div 
+          onClick={() => setFullScreenImage(null)}
+          className="fixed inset-0 z-50 bg-black/95 flex flex-col items-center justify-center p-2 backdrop-blur-md cursor-zoom-out animate-in fade-in duration-150"
+        >
+          <button
+            onClick={() => setFullScreenImage(null)}
+            className="absolute top-4 right-4 z-50 bg-white/20 hover:bg-white/40 text-white text-lg font-extrabold w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-lg border border-white/30 transition-all"
+          >
+            ✕
+          </button>
+
+          <div className="absolute top-5 text-white/70 text-xs font-bold pointer-events-none">
+            {lang === 'zh' ? '点击任意区域返回' : 'Tap anywhere to exit'}
+          </div>
+
+          <div className="w-full h-full max-w-4xl max-h-[90vh] flex items-center justify-center p-2">
+            <img
+              src={fullScreenImage}
+              alt="Fullscreen View"
+              className="max-w-full max-h-full object-contain rounded-xl shadow-2xl transition-transform duration-200"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
