@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
+import { GoogleGenAI } from '@google/genai';
 import { Login } from './Login';
 
 // ========================================================
-// 🔗 Supabase 配置（带持久化登录）
+// 🔗 Supabase & AI 配置
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
@@ -18,15 +19,19 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   },
 });
 
-// ✉️ EmailJS 建议反馈与提醒服务密钥
 const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
 const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
+
+// 🤖 初始化 Gemini 实例 (优先读取 .env 中的 VITE_GEMINI_API_KEY)
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 interface RevisionLog {
   stage: number | string;
   imageUrl: string;
   date: string;
+  aiFeedback?: string; // 存储 AI 纠错与批改建议
 }
 
 interface KnowledgeItem {
@@ -76,7 +81,7 @@ const TRANSLATIONS = {
     customSubTitle: '🏷️ 你的专属科目',
     langSwitch: '🌐 语言切换 / Language',
     enterSubject: '输入新自定义科目名称：',
-    reviewNotice: '📸 上传本次复习重写笔记/答题照片 (可选)',
+    reviewNotice: '📸 上传本次复习重写笔记/答题照片',
     completeBtn: '掌握知识点，打卡过关！ 🎉',
     close: '关闭',
     totalPhotos: '张笔记',
@@ -89,6 +94,9 @@ const TRANSLATIONS = {
     noRankData: '尚无其他活跃用户，快去邀请朋友一起来打卡吧！',
     initialReview: '初次复习',
     dayStageText: (stage: number) => `第 ${stage} 次复习`,
+    aiCorrectionBtn: '🤖 让 Gemini AI 批改与纠错',
+    aiAnalyzing: '🤖 Gemini 正在深度比对与批改笔记中...',
+    aiResultTitle: '💡 Gemini 智能批改诊断报告',
   },
   en: {
     home: 'Home',
@@ -116,7 +124,7 @@ const TRANSLATIONS = {
     customSubTitle: '🏷️ Your Custom Subjects',
     langSwitch: '🌐 Language / 语言切换',
     enterSubject: 'Enter new custom subject name:',
-    reviewNotice: '📸 Upload Review Notes Photo (Optional)',
+    reviewNotice: '📸 Upload Review Notes Photo',
     completeBtn: 'Mastered & Complete Level! 🎉',
     close: 'Close',
     totalPhotos: 'Notes',
@@ -129,6 +137,9 @@ const TRANSLATIONS = {
     noRankData: 'No other active users yet. Invite your friends to join!',
     initialReview: 'Initial Review',
     dayStageText: (stage: number) => `Stage ${stage} Review`,
+    aiCorrectionBtn: '🤖 Grade & Correct with Gemini AI',
+    aiAnalyzing: '🤖 Gemini is analyzing and correcting your notes...',
+    aiResultTitle: '💡 Gemini AI Diagnostic Report',
   }
 };
 
@@ -136,7 +147,6 @@ export default function App() {
   const [session, setSession] = useState<any>(null);
   const [authChecking, setAuthChecking] = useState<boolean>(true);
 
-  // 🌐 多语言状态
   const [lang, setLang] = useState<'zh' | 'en'>(
     () => (localStorage.getItem('app_lang') as 'zh' | 'en') || 'zh'
   );
@@ -157,6 +167,10 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [reviewNewImage, setReviewNewImage] = useState<string | null>(null);
 
+  // 🤖 AI 纠错状态
+  const [aiFeedback, setAiFeedback] = useState<string>('');
+  const [isAiAnalyzing, setIsAiAnalyzing] = useState<boolean>(false);
+
   // 🔍 全屏大图灯箱状态
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
@@ -174,7 +188,6 @@ export default function App() {
   } | null>(null);
 
   const [loading, setLoading] = useState<boolean>(false);
-  const reminderChecked = useRef<boolean>(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -214,7 +227,6 @@ export default function App() {
     return Math.floor((today - start) / (1000 * 60 * 60 * 24));
   }
 
-  // 🧠 新版智能复习匹配判定
   const todayTasks = items.flatMap(item => {
     const daysPassed = getDaysPassed(item.uploadDate);
     const stageIndex = MILESTONE_INTERVALS.indexOf(daysPassed);
@@ -229,39 +241,6 @@ export default function App() {
 
     return [];
   });
-
-  // ✉️ 方案 A：静默检测并发送打卡提醒邮件（每日仅限一次）
-  useEffect(() => {
-    if (session?.user?.email && todayTasks.length > 0 && !reminderChecked.current) {
-      reminderChecked.current = true;
-      const todayStr = getTodayStr();
-      const reminderKey = `reminder_sent_${session.user.id}_${todayStr}`;
-
-      // 仅在今天尚未发送过提醒时触发
-      if (!localStorage.getItem(reminderKey)) {
-        const taskSummary = todayTasks
-          .map((t, idx) => `${idx + 1}. [${t.item.subject}] - 第 ${t.stageNumber} 次复习`)
-          .join('\n');
-
-        emailjs.send(
-          EMAILJS_SERVICE_ID,
-          EMAILJS_TEMPLATE_ID,
-          {
-            user_email: session.user.email,
-            task_count: todayTasks.length,
-            message: `【1357打卡提醒】你今天有 ${todayTasks.length} 个复习任务待完成：\n${taskSummary}\n\n加油，保持连胜！`,
-            submit_time: new Date().toLocaleString(),
-          },
-          EMAILJS_PUBLIC_KEY
-        ).then(() => {
-          localStorage.setItem(reminderKey, 'true');
-          console.log('✅ 今日打卡邮件提醒已静默发送至邮箱');
-        }).catch((err) => {
-          console.warn('⚠️ 提醒邮件发送受阻:', err);
-        });
-      }
-    }
-  }, [items, session]);
 
   async function fetchCustomSubjects() {
     const { data, error } = await supabase
@@ -477,7 +456,69 @@ export default function App() {
 
   const handleReviewImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) compressImage(file, setReviewNewImage);
+    if (file) {
+      compressImage(file, (base64) => {
+        setReviewNewImage(base64);
+        setAiFeedback(''); // 重置之前的批改结果
+      });
+    }
+  };
+
+  // 🤖 核心功能：调用 Gemini 2.5 Flash 对比批改纠错
+  const handleGeminiCorrection = async () => {
+    if (!activeModalItem || !reviewNewImage) {
+      alert(lang === 'zh' ? '请先上传本次复习的笔记/答题照片！' : 'Please upload your review notes first!');
+      return;
+    }
+
+    setIsAiAnalyzing(true);
+    try {
+      // 提取 Base64 纯数据部分
+      const originalBase64 = activeModalItem.item.imageUrl.split(',')[1];
+      const reviewBase64 = reviewNewImage.split(',')[1];
+
+      const prompt = `
+你是一位极其资深且富有耐心的全科金牌教师。
+用户正在进行艾宾浩斯第 ${activeModalItem.stageNumber} 轮复习打卡。
+【图1】是原始的学习笔记/原题/知识点标准内容；
+【图2】是用户今天本次复习默写、重写或解题的照片。
+
+请针对【图2】进行详细的批改与纠错：
+1. 🎯 【完成度与正误判定】：分析用户是否掌握了核心公式/知识点/推导过程。
+2. 🔍 【错因与漏洞诊断】：精准指出漏写、笔误、符号错误或理解偏差的地方。
+3. 💡 【名师记忆口诀与点拨】：给出 1~2 句话的高效记忆技巧或巩固建议。
+
+请使用精炼、鼓励且排版清晰的 Markdown 输出（可适当使用 Emoji）。
+`;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: [
+          prompt,
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: originalBase64,
+            },
+          },
+          {
+            inlineData: {
+              mimeType: 'image/jpeg',
+              data: reviewBase64,
+            },
+          },
+        ],
+      });
+
+      if (response.text) {
+        setAiFeedback(response.text);
+      }
+    } catch (err: any) {
+      console.error('Gemini 批改失败:', err);
+      alert(`AI 批改失败: ${err.message || '请检查 API Key 配置'}`);
+    } finally {
+      setIsAiAnalyzing(false);
+    }
   };
 
   const handleSaveNewKnowledge = async () => {
@@ -515,7 +556,8 @@ export default function App() {
       updatedRevisions.push({
         stage: stageNumber,
         imageUrl: reviewNewImage,
-        date: getTodayStr()
+        date: getTodayStr(),
+        aiFeedback: aiFeedback || undefined, // 保存 AI 批改分析
       });
     }
 
@@ -550,6 +592,7 @@ export default function App() {
     }
 
     setReviewNewImage(null);
+    setAiFeedback('');
     setActiveModalItem(null);
     fetchLeaderboard();
   };
@@ -690,6 +733,7 @@ export default function App() {
                       key={taskId}
                       onClick={() => {
                         setReviewNewImage(null);
+                        setAiFeedback('');
                         setActiveModalItem({ item, stageNumber, type: 'review' });
                       }}
                       className={`w-full p-4 rounded-2xl font-extrabold flex justify-between items-center transition-all ${
@@ -1005,7 +1049,7 @@ export default function App() {
       {/* Modal 业务弹窗 */}
       {activeModalItem && (
         <div className="fixed inset-0 z-40 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative">
+          <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center">
               <span className="font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl text-xs">
                 {activeModalItem.item.subject} · {activeModalItem.stageNumber === 1 ? t.initialReview : t.dayStageText(activeModalItem.stageNumber)}
@@ -1014,6 +1058,7 @@ export default function App() {
                 onClick={() => {
                   setActiveModalItem(null);
                   setReviewNewImage(null);
+                  setAiFeedback('');
                 }}
                 className="text-slate-400 hover:text-slate-600 text-sm font-bold bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center"
               >
@@ -1021,12 +1066,12 @@ export default function App() {
               </button>
             </div>
 
-            {/* 复习挑战弹窗 */}
+            {/* 🎯 复习挑战与 AI 批改弹窗 */}
             {activeModalItem.type === 'review' && (
               <div className="space-y-4">
                 <div 
                   onClick={() => setFullScreenImage(activeModalItem.item.imageUrl)}
-                  className="max-h-[45vh] overflow-hidden rounded-2xl bg-slate-900 flex items-center justify-center p-1 cursor-pointer group relative"
+                  className="max-h-[35vh] overflow-hidden rounded-2xl bg-slate-900 flex items-center justify-center p-1 cursor-pointer group relative"
                 >
                   <img
                     src={activeModalItem.item.imageUrl}
@@ -1047,13 +1092,36 @@ export default function App() {
                   </label>
 
                   {reviewNewImage && (
-                    <div 
-                      onClick={() => setFullScreenImage(reviewNewImage)}
-                      className="relative h-20 w-full overflow-hidden rounded-xl border bg-slate-100 cursor-pointer group"
-                    >
-                      <img src={reviewNewImage} alt="New note" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
-                      <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm">
-                        {t.clickToEnlarge}
+                    <div className="space-y-2">
+                      <div 
+                        onClick={() => setFullScreenImage(reviewNewImage)}
+                        className="relative h-24 w-full overflow-hidden rounded-xl border bg-slate-100 cursor-pointer group"
+                      >
+                        <img src={reviewNewImage} alt="New note" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                        <div className="absolute bottom-1 right-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded backdrop-blur-sm">
+                          {t.clickToEnlarge}
+                        </div>
+                      </div>
+
+                      {/* 🤖 Gemini AI 纠错触发按钮 */}
+                      <button
+                        onClick={handleGeminiCorrection}
+                        disabled={isAiAnalyzing}
+                        className="w-full py-2.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 text-white text-xs font-extrabold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
+                      >
+                        {isAiAnalyzing ? t.aiAnalyzing : t.aiCorrectionBtn}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* 💡 AI 批改诊断结果卡片 */}
+                  {aiFeedback && (
+                    <div className="bg-indigo-50/80 border-2 border-indigo-200 rounded-2xl p-3.5 space-y-1.5 text-xs text-slate-700">
+                      <div className="font-extrabold text-indigo-700 flex items-center gap-1">
+                        {t.aiResultTitle}
+                      </div>
+                      <div className="whitespace-pre-wrap leading-relaxed text-[11px] max-h-48 overflow-y-auto bg-white/70 p-2.5 rounded-xl border border-indigo-100">
+                        {aiFeedback}
                       </div>
                     </div>
                   )}
@@ -1072,7 +1140,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 资料库相册弹窗 */}
+            {/* 📂 资料库相册弹窗（支持展示历史 AI 纠错记录） */}
             {activeModalItem.type === 'viewFolder' && (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
                 <div className="bg-slate-50 rounded-2xl p-3 border space-y-2">
@@ -1115,6 +1183,14 @@ export default function App() {
                           {t.clickToEnlarge}
                         </div>
                       </div>
+
+                      {/* 历史记录中保存的 AI 点评 */}
+                      {rev.aiFeedback && (
+                        <div className="bg-white/90 p-2.5 rounded-xl border border-indigo-100 text-[11px] text-slate-700 whitespace-pre-wrap">
+                          <strong className="text-indigo-600 block mb-1">🤖 Gemini 批改记录：</strong>
+                          {rev.aiFeedback}
+                        </div>
+                      )}
                     </div>
                   ))
                 )}
