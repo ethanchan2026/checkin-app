@@ -1,15 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Login } from './Login';
 
 // ========================================================
 // 🔗 Supabase & AI 配置
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwpouymbntlhvfbint.supabase.co';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -23,15 +23,15 @@ const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
 const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
 
-// 🤖 初始化 Gemini 实例 (优先读取 .env 中的 VITE_GEMINI_API_KEY)
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AQ.Ab8RN6Kr9t4MDUfyJkukY45tBLxkYhZTtYc8wn6RHuZ24xy2sA';
-const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+// 🤖 初始化 Gemini 实例
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 interface RevisionLog {
   stage: number | string;
   imageUrl: string;
   date: string;
-  aiFeedback?: string; // 存储 AI 纠错与批改建议
+  aiFeedback?: string;
 }
 
 interface KnowledgeItem {
@@ -459,12 +459,12 @@ export default function App() {
     if (file) {
       compressImage(file, (base64) => {
         setReviewNewImage(base64);
-        setAiFeedback(''); // 重置之前的批改结果
+        setAiFeedback('');
       });
     }
   };
 
-  // 🤖 核心功能：调用 Gemini 2.5 Flash 对比批改纠错
+  // 🤖 核心功能：调用 Gemini 对比批改纠错
   const handleGeminiCorrection = async () => {
     if (!activeModalItem || !reviewNewImage) {
       alert(lang === 'zh' ? '请先上传本次复习的笔记/答题照片！' : 'Please upload your review notes first!');
@@ -473,9 +473,11 @@ export default function App() {
 
     setIsAiAnalyzing(true);
     try {
-      // 提取 Base64 纯数据部分
       const originalBase64 = activeModalItem.item.imageUrl.split(',')[1];
       const reviewBase64 = reviewNewImage.split(',')[1];
+
+      // 使用 gemini-2.5-flash / gemini-1.5-flash
+      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       const prompt = `
 你是一位极其资深且富有耐心的全科金牌教师。
@@ -491,27 +493,25 @@ export default function App() {
 请使用精炼、鼓励且排版清晰的 Markdown 输出（可适当使用 Emoji）。
 `;
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: [
-          prompt,
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: originalBase64,
-            },
+      const result = await model.generateContent([
+        prompt,
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: originalBase64,
           },
-          {
-            inlineData: {
-              mimeType: 'image/jpeg',
-              data: reviewBase64,
-            },
+        },
+        {
+          inlineData: {
+            mimeType: 'image/jpeg',
+            data: reviewBase64,
           },
-        ],
-      });
+        },
+      ]);
 
-      if (response.text) {
-        setAiFeedback(response.text);
+      const responseText = result.response.text();
+      if (responseText) {
+        setAiFeedback(responseText);
       }
     } catch (err: any) {
       console.error('Gemini 批改失败:', err);
@@ -557,7 +557,7 @@ export default function App() {
         stage: stageNumber,
         imageUrl: reviewNewImage,
         date: getTodayStr(),
-        aiFeedback: aiFeedback || undefined, // 保存 AI 批改分析
+        aiFeedback: aiFeedback || undefined,
       });
     }
 
@@ -1140,7 +1140,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 📂 资料库相册弹窗（支持展示历史 AI 纠错记录） */}
+            {/* 📂 资料库相册弹窗 */}
             {activeModalItem.type === 'viewFolder' && (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
                 <div className="bg-slate-50 rounded-2xl p-3 border space-y-2">
@@ -1184,7 +1184,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* 历史记录中保存的 AI 点评 */}
                       {rev.aiFeedback && (
                         <div className="bg-white/90 p-2.5 rounded-xl border border-indigo-100 text-[11px] text-slate-700 whitespace-pre-wrap">
                           <strong className="text-indigo-600 block mb-1">🤖 Gemini 批改记录：</strong>
