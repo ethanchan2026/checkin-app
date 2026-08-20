@@ -2,11 +2,10 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Login } from './Login';
 
 // ========================================================
-// 🔗 Supabase 配置 (已修复完整正确的 Key)
+// 🔗 Supabase 配置
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
@@ -94,7 +93,6 @@ const TRANSLATIONS = {
     aiAnalyzing: '🤖 Gemini 正在深度比对与批改笔记中...',
     aiResultTitle: '💡 Gemini 智能批改诊断报告',
     setApiKey: '🔑 设置 Gemini API Key',
-    apiKeyConfigured: 'Gemini API Key 已配置',
   },
   en: {
     home: 'Home',
@@ -139,7 +137,6 @@ const TRANSLATIONS = {
     aiAnalyzing: '🤖 Gemini is analyzing and correcting your notes...',
     aiResultTitle: '💡 Gemini AI Diagnostic Report',
     setApiKey: '🔑 Set Gemini API Key',
-    apiKeyConfigured: 'Gemini API Key Configured',
   }
 };
 
@@ -167,14 +164,14 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [reviewNewImage, setReviewNewImage] = useState<string | null>(null);
 
-  // 🤖 AI 纠错与 API Key 状态
+  // 🤖 API Key 状态管理
   const [userApiKey, setUserApiKey] = useState<string>(() => {
     return localStorage.getItem('custom_gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
   });
   const [aiFeedback, setAiFeedback] = useState<string>('');
   const [isAiAnalyzing, setIsAiAnalyzing] = useState<boolean>(false);
 
-  // 🔍 全屏大图灯箱状态
+  // 🔍 全屏大图灯箱
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
 
   const [notificationPermission, setNotificationPermission] = useState<string>(
@@ -278,7 +275,7 @@ export default function App() {
   };
 
   const handleConfigureApiKey = () => {
-    const inputKey = prompt('请输入你的 Gemini API Key (以 AIza... 开头):', userApiKey);
+    const inputKey = prompt('请输入你的 Gemini API Key:', userApiKey);
     if (inputKey !== null) {
       const cleanKey = inputKey.trim();
       setUserApiKey(cleanKey);
@@ -477,7 +474,7 @@ export default function App() {
     }
   };
 
-// 🤖 核心功能：调用 Gemini 对比批改纠错 (带自动容错与多模型适配)
+// 🤖 核心功能：自动探测可用模型 + 原生 Fetch 智能批改 (已适配最新模型)
   const handleGeminiCorrection = async () => {
     if (!activeModalItem || !reviewNewImage) {
       alert(lang === 'zh' ? '请先上传本次复习的笔记/答题照片！' : 'Please upload your review notes first!');
@@ -486,7 +483,7 @@ export default function App() {
 
     let activeKey = (userApiKey || '').trim();
     if (!activeKey) {
-      const inputKey = prompt('检测到尚未配置 Gemini API Key，请输入您的 API Key (以 AIza... 开头):');
+      const inputKey = prompt('检测到尚未配置 Gemini API Key，请输入您的 API Key:');
       if (!inputKey || !inputKey.trim()) {
         alert('未提供 API Key，无法使用 AI 批改功能。');
         return;
@@ -498,9 +495,39 @@ export default function App() {
 
     setIsAiAnalyzing(true);
     try {
-      const genAI = new GoogleGenerativeAI(activeKey);
       const originalBase64 = activeModalItem.item.imageUrl.split(',')[1];
       const reviewBase64 = reviewNewImage.split(',')[1];
+
+      // 1. 优先尝试获取当前 API Key 真实支持的模型列表
+      let candidateModels = [
+        'gemini-3.6-flash',
+        'gemini-2.5-flash',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
+      ];
+
+      try {
+        const listRes = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models?key=${activeKey}`
+        );
+        const listData = await listRes.json();
+        
+        if (listData.models && Array.isArray(listData.models)) {
+          const availableGemini = listData.models
+            .filter(
+              (m: any) =>
+                m.supportedGenerationMethods?.includes('generateContent') &&
+                m.name?.includes('gemini')
+            )
+            .map((m: any) => m.name.replace('models/', ''));
+          
+          if (availableGemini.length > 0) {
+            candidateModels = availableGemini;
+          }
+        }
+      } catch (e) {
+        console.warn('动态探测模型失败，将使用预设模型列表', e);
+      }
 
       const promptText = `
 你是一位极其资深且富有耐心的全科金牌教师。
@@ -516,62 +543,73 @@ export default function App() {
 请使用精炼、鼓励且排版清晰的 Markdown 输出（可适当使用 Emoji）。
 `;
 
-      const contents = [
-        promptText,
-        {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: originalBase64,
+      const requestBody = {
+        contents: [
+          {
+            parts: [
+              { text: promptText },
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: originalBase64,
+                },
+              },
+              {
+                inlineData: {
+                  mimeType: 'image/jpeg',
+                  data: reviewBase64,
+                },
+              },
+            ],
           },
-        },
-        {
-          inlineData: {
-            mimeType: 'image/jpeg',
-            data: reviewBase64,
-          },
-        },
-      ];
-
-      // 尝试可用的模型名称序列（保证 100% 命中）
-      const candidateModels = [
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-        'gemini-1.5-pro-latest',
-        'gemini-1.5-pro',
-      ];
+        ],
+      };
 
       let responseText = '';
-      let lastError: any = null;
+      let lastErrorMessage = '';
 
       for (const modelName of candidateModels) {
         try {
-          const model = genAI.getGenerativeModel({ model: modelName });
-          const result = await model.generateContent(contents);
-          responseText = result.response.text();
-          if (responseText) break;
-        } catch (err: any) {
-          lastError = err;
-          // 如果是 404 模型不存在，继续尝试下一个候选模型
-          if (err.message && err.message.includes('404')) {
+          const cleanModelName = modelName.startsWith('models/') ? modelName : `models/${modelName}`;
+          const res = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/${cleanModelName}:generateContent?key=${activeKey}`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(requestBody),
+            }
+          );
+
+          const data = await res.json();
+
+          if (res.ok && data.candidates && data.candidates[0]?.content?.parts?.[0]?.text) {
+            responseText = data.candidates[0].content.parts[0].text;
+            break;
+          } else if (data.error) {
+            lastErrorMessage = data.error.message;
+            // 若模型不可用/已弃用，继续尝试列表中下一个可用模型
             continue;
-          } else {
-            throw err;
           }
+        } catch (err: any) {
+          lastErrorMessage = err.message;
+          continue;
         }
       }
 
       if (responseText) {
         setAiFeedback(responseText);
-      } else if (lastError) {
-        throw lastError;
+      } else {
+        throw new Error(lastErrorMessage || '所有可用模型均未能成功响应');
       }
     } catch (err: any) {
       console.error('Gemini 批改失败:', err);
       const errMsg = err.message || '';
-      if (errMsg.includes('API_KEY_INVALID')) {
-        alert('❌ Gemini API Key 无效，请前往个人中心重新配置正确的 Key（以 AIza 开头）');
+      if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid')) {
+        alert('❌ API Key 鉴权失败，请确认 Key 是否完整正确');
       } else if (errMsg.includes('Failed to fetch')) {
-        alert('🌐 网络连接失败：调用 Google Gemini 服务需要开启网络代理/科学上网环境。');
+        alert('🌐 网络连接失败：调用 Google 服务需要开启网络代理环境。');
       } else {
         alert(`AI 批改遇到异常: ${errMsg}`);
       }
@@ -579,7 +617,6 @@ export default function App() {
       setIsAiAnalyzing(false);
     }
   };
-
   const handleSaveNewKnowledge = async () => {
     if (!previewImage || !session) return;
 
@@ -988,7 +1025,7 @@ export default function App() {
                 <div>
                   <p className="text-xs font-bold text-slate-700">{t.setApiKey}</p>
                   <p className="text-[10px] text-slate-400">
-                    {userApiKey ? `已配置 (***${userApiKey.slice(-4)})` : '未配置 (点击右侧设置)'}
+                    {userApiKey ? `已配置 (***${userApiKey.slice(-4)})` : '未配置 (点击右侧配置)'}
                   </p>
                 </div>
                 <button
@@ -1088,7 +1125,7 @@ export default function App() {
         </main>
       )}
 
-      {/* 📌 底部固定 Navigation Bar */}
+      {/* 📌 底部导航栏 */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t-2 border-slate-200 px-6 py-2 shadow-2xl max-w-md mx-auto flex justify-around items-center">
         <button
           onClick={() => setCurrentTab('home')}
