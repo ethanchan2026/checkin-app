@@ -93,8 +93,8 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, lang, onToggleLang }) =
           🌐 {isZh ? 'EN' : '中文'}
         </button>
 
-        <div className="w-20 h-20 bg-green-500 rounded-3xl mx-auto flex items-center justify-center text-4xl shadow-lg border-b-4 border-green-700 pt-1">
-          🦉
+        <div className="w-20 h-20 rounded-3xl mx-auto overflow-hidden shadow-lg border-2 border-slate-200 bg-white p-1">
+        <img src="/app-logo.png" alt="App Logo" className="w-full h-full object-cover rounded-2xl" />
         </div>
 
         <div>
