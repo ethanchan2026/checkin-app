@@ -9,7 +9,7 @@ import { Login } from './Login';
 // 🔗 Supabase 配置
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwpouymbntlhvfbint.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwpouymbntlhvfbintIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
