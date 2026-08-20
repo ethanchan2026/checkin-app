@@ -24,7 +24,7 @@ const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
 
 // 🤖 初始化 Gemini 实例 (优先读取 .env 中的 VITE_GEMINI_API_KEY)
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || 'AQ.Ab8RN6Kr9t4MDUfyJkukY45tBLxkYhZTtYc8wn6RHuZ24xy2sA';
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
 interface RevisionLog {
