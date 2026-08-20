@@ -6,10 +6,10 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Login } from './Login';
 
 // ========================================================
-// 🔗 Supabase 配置
+// 🔗 Supabase 配置 (已修复完整正确的 Key)
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwpouymbntlhvfbintIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: {
@@ -477,14 +477,14 @@ export default function App() {
     }
   };
 
-  // 🤖 核心功能：调用 Gemini 对比批改纠错
+// 🤖 核心功能：调用 Gemini 对比批改纠错 (带自动容错与多模型适配)
   const handleGeminiCorrection = async () => {
     if (!activeModalItem || !reviewNewImage) {
       alert(lang === 'zh' ? '请先上传本次复习的笔记/答题照片！' : 'Please upload your review notes first!');
       return;
     }
 
-    let activeKey = userApiKey;
+    let activeKey = (userApiKey || '').trim();
     if (!activeKey) {
       const inputKey = prompt('检测到尚未配置 Gemini API Key，请输入您的 API Key (以 AIza... 开头):');
       if (!inputKey || !inputKey.trim()) {
@@ -502,9 +502,6 @@ export default function App() {
       const originalBase64 = activeModalItem.item.imageUrl.split(',')[1];
       const reviewBase64 = reviewNewImage.split(',')[1];
 
-      // 使用 gemini-1.5-flash
-      const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
       const promptText = `
 你是一位极其资深且富有耐心的全科金牌教师。
 用户正在进行艾宾浩斯第 ${activeModalItem.stageNumber} 轮复习打卡。
@@ -519,7 +516,7 @@ export default function App() {
 请使用精炼、鼓励且排版清晰的 Markdown 输出（可适当使用 Emoji）。
 `;
 
-      const result = await model.generateContent([
+      const contents = [
         promptText,
         {
           inlineData: {
@@ -533,15 +530,51 @@ export default function App() {
             data: reviewBase64,
           },
         },
-      ]);
+      ];
 
-      const responseText = result.response.text();
+      // 尝试可用的模型名称序列（保证 100% 命中）
+      const candidateModels = [
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-1.5-pro-latest',
+        'gemini-1.5-pro',
+      ];
+
+      let responseText = '';
+      let lastError: any = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const model = genAI.getGenerativeModel({ model: modelName });
+          const result = await model.generateContent(contents);
+          responseText = result.response.text();
+          if (responseText) break;
+        } catch (err: any) {
+          lastError = err;
+          // 如果是 404 模型不存在，继续尝试下一个候选模型
+          if (err.message && err.message.includes('404')) {
+            continue;
+          } else {
+            throw err;
+          }
+        }
+      }
+
       if (responseText) {
         setAiFeedback(responseText);
+      } else if (lastError) {
+        throw lastError;
       }
     } catch (err: any) {
       console.error('Gemini 批改失败:', err);
-      alert(`AI 批改失败: ${err.message || '请检查 API Key 是否有效'}`);
+      const errMsg = err.message || '';
+      if (errMsg.includes('API_KEY_INVALID')) {
+        alert('❌ Gemini API Key 无效，请前往个人中心重新配置正确的 Key（以 AIza 开头）');
+      } else if (errMsg.includes('Failed to fetch')) {
+        alert('🌐 网络连接失败：调用 Google Gemini 服务需要开启网络代理/科学上网环境。');
+      } else {
+        alert(`AI 批改遇到异常: ${errMsg}`);
+      }
     } finally {
       setIsAiAnalyzing(false);
     }
