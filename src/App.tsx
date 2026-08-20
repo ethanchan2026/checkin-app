@@ -6,7 +6,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Login } from './Login';
 
 // ========================================================
-// 🔗 Supabase & AI 配置
+// 🔗 Supabase 配置
 // ========================================================
 const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwpouymbntlhvfbint.supabase.co';
@@ -22,10 +22,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
 const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
-
-// 🤖 初始化 Gemini 实例
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || '';
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
 interface RevisionLog {
   stage: number | string;
@@ -97,6 +93,8 @@ const TRANSLATIONS = {
     aiCorrectionBtn: '🤖 让 Gemini AI 批改与纠错',
     aiAnalyzing: '🤖 Gemini 正在深度比对与批改笔记中...',
     aiResultTitle: '💡 Gemini 智能批改诊断报告',
+    setApiKey: '🔑 设置 Gemini API Key',
+    apiKeyConfigured: 'Gemini API Key 已配置',
   },
   en: {
     home: 'Home',
@@ -140,6 +138,8 @@ const TRANSLATIONS = {
     aiCorrectionBtn: '🤖 Grade & Correct with Gemini AI',
     aiAnalyzing: '🤖 Gemini is analyzing and correcting your notes...',
     aiResultTitle: '💡 Gemini AI Diagnostic Report',
+    setApiKey: '🔑 Set Gemini API Key',
+    apiKeyConfigured: 'Gemini API Key Configured',
   }
 };
 
@@ -167,7 +167,10 @@ export default function App() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [reviewNewImage, setReviewNewImage] = useState<string | null>(null);
 
-  // 🤖 AI 纠错状态
+  // 🤖 AI 纠错与 API Key 状态
+  const [userApiKey, setUserApiKey] = useState<string>(() => {
+    return localStorage.getItem('custom_gemini_api_key') || import.meta.env.VITE_GEMINI_API_KEY || '';
+  });
   const [aiFeedback, setAiFeedback] = useState<string>('');
   const [isAiAnalyzing, setIsAiAnalyzing] = useState<boolean>(false);
 
@@ -271,6 +274,16 @@ export default function App() {
           alert(`添加失败：${error.message}`);
         }
       }
+    }
+  };
+
+  const handleConfigureApiKey = () => {
+    const inputKey = prompt('请输入你的 Gemini API Key (以 AIza... 开头):', userApiKey);
+    if (inputKey !== null) {
+      const cleanKey = inputKey.trim();
+      setUserApiKey(cleanKey);
+      localStorage.setItem('custom_gemini_api_key', cleanKey);
+      alert(cleanKey ? '✅ Gemini API Key 已成功保存！' : '⚠️ 已清除 API Key');
     }
   };
 
@@ -471,15 +484,28 @@ export default function App() {
       return;
     }
 
+    let activeKey = userApiKey;
+    if (!activeKey) {
+      const inputKey = prompt('检测到尚未配置 Gemini API Key，请输入您的 API Key (以 AIza... 开头):');
+      if (!inputKey || !inputKey.trim()) {
+        alert('未提供 API Key，无法使用 AI 批改功能。');
+        return;
+      }
+      activeKey = inputKey.trim();
+      setUserApiKey(activeKey);
+      localStorage.setItem('custom_gemini_api_key', activeKey);
+    }
+
     setIsAiAnalyzing(true);
     try {
+      const genAI = new GoogleGenerativeAI(activeKey);
       const originalBase64 = activeModalItem.item.imageUrl.split(',')[1];
       const reviewBase64 = reviewNewImage.split(',')[1];
 
-      // 使用 gemini-2.5-flash / gemini-1.5-flash
+      // 使用 gemini-1.5-flash
       const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
-      const prompt = `
+      const promptText = `
 你是一位极其资深且富有耐心的全科金牌教师。
 用户正在进行艾宾浩斯第 ${activeModalItem.stageNumber} 轮复习打卡。
 【图1】是原始的学习笔记/原题/知识点标准内容；
@@ -494,7 +520,7 @@ export default function App() {
 `;
 
       const result = await model.generateContent([
-        prompt,
+        promptText,
         {
           inlineData: {
             mimeType: 'image/jpeg',
@@ -515,7 +541,7 @@ export default function App() {
       }
     } catch (err: any) {
       console.error('Gemini 批改失败:', err);
-      alert(`AI 批改失败: ${err.message || '请检查 API Key 配置'}`);
+      alert(`AI 批改失败: ${err.message || '请检查 API Key 是否有效'}`);
     } finally {
       setIsAiAnalyzing(false);
     }
@@ -924,6 +950,22 @@ export default function App() {
             </div>
 
             <div className="space-y-3 pt-2 border-t">
+              {/* 🔑 API Key 设置 */}
+              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">{t.setApiKey}</p>
+                  <p className="text-[10px] text-slate-400">
+                    {userApiKey ? `已配置 (***${userApiKey.slice(-4)})` : '未配置 (点击右侧设置)'}
+                  </p>
+                </div>
+                <button
+                  onClick={handleConfigureApiKey}
+                  className="text-xs bg-purple-600 hover:bg-purple-700 text-white font-extrabold px-3 py-1.5 rounded-xl shadow-sm transition-all"
+                >
+                  {userApiKey ? '修改 Key' : '配置 Key'}
+                </button>
+              </div>
+
               <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
                 <span className="text-xs font-bold text-slate-700">{t.langSwitch}</span>
                 <button
