@@ -25,16 +25,17 @@ const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
 interface RevisionLog {
   stage: number | string;
   imageUrl?: string;
-  imageUrls?: string[]; // 支持多图
+  imageUrls?: string[];
   date: string;
   aiFeedback?: string;
 }
 
 interface KnowledgeItem {
   id: string;
+  title?: string; // 🏷️ 自定义卡片/文件夹名称
   subject: string;
   imageUrl?: string;
-  imageUrls?: string[]; // 支持多图
+  imageUrls?: string[];
   uploadDate: string;
   revisions?: RevisionLog[];
   user_id?: string;
@@ -57,14 +58,17 @@ const TRANSLATIONS = {
     leaderboard: '排行榜',
     profile: '个人中心',
     uploadTitle: '📸 上传新复习资料（可多选）',
+    titlePlaceholder: '输入资料/卡片名称（如：三角函数诱导公式）',
     clickUpload: '+ 点击添加笔记/原题照片（支持多选与累加）',
     saveBtn: (count: number) => `保存 ${count} 张资料并生成复习关卡`,
     todayTasks: '🎯 今日复习关卡',
     noTasks: '🎉 今天没有需要复习的任务，快去上传新资料吧！',
     databaseTitle: '📂 资料历史数据库',
+    searchPlaceholder: '🔍 搜索卡片名称或科目...',
     all: '全部',
     addSubject: '+ 新增',
     deleteSet: '删除整套资料',
+    renameSet: '重命名',
     mastered: '✅ 已掌握',
     challenge: '挑战 ➔',
     nativeNotice: '🔔 系统原生通知',
@@ -78,6 +82,7 @@ const TRANSLATIONS = {
     customSubTitle: '🏷️ 你的专属科目',
     langSwitch: '🌐 语言切换 / Language',
     enterSubject: '输入新自定义科目名称：',
+    enterNewTitle: '输入新的卡片/文件夹名称：',
     reviewNotice: '📸 上传本次复习重写笔记/答题照片（可多选）',
     completeBtn: '掌握知识点，打卡过关！ 🎉',
     close: '关闭',
@@ -101,14 +106,17 @@ const TRANSLATIONS = {
     leaderboard: 'Leaderboard',
     profile: 'Profile',
     uploadTitle: '📸 Upload Study Materials (Multi-image)',
+    titlePlaceholder: 'Enter title (e.g. Trig Formulas)',
     clickUpload: '+ Add Note Photos (Multi-select supported)',
     saveBtn: (count: number) => `Save ${count} Notes & Generate Levels`,
     todayTasks: "🎯 Today's Review Levels",
     noTasks: '🎉 No review tasks today. Go upload new materials!',
     databaseTitle: '📂 Study Material Library',
+    searchPlaceholder: '🔍 Search by title or subject...',
     all: 'All',
     addSubject: '+ Add',
     deleteSet: 'Delete Deck',
+    renameSet: 'Rename',
     mastered: '✅ Mastered',
     challenge: 'Start ➔',
     nativeNotice: '🔔 System Notification',
@@ -122,6 +130,7 @@ const TRANSLATIONS = {
     customSubTitle: '🏷️ Your Custom Subjects',
     langSwitch: '🌐 Language / 语言切换',
     enterSubject: 'Enter new custom subject name:',
+    enterNewTitle: 'Enter new deck/card title:',
     reviewNotice: '📸 Upload Review Photos (Multi-select)',
     completeBtn: 'Mastered & Complete Level! 🎉',
     close: 'Close',
@@ -161,10 +170,13 @@ export default function App() {
   
   const [realLeaderboard, setRealLeaderboard] = useState<LeaderboardUser[]>([]);
 
+  // 🔍 检索与过滤状态
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedSubject, setSelectedSubject] = useState<string>('ALL');
+
+  // 📸 上传表单状态
+  const [newTitle, setNewTitle] = useState<string>('');
   const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
-  
-  // 📸 多图状态管理
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
 
@@ -288,7 +300,6 @@ export default function App() {
     }
   };
 
-  // 获取卡片包含的所有原图
   const getItemImages = (item: KnowledgeItem): string[] => {
     if (item.imageUrls && item.imageUrls.length > 0) {
       return item.imageUrls;
@@ -296,7 +307,6 @@ export default function App() {
     return item.imageUrl ? [item.imageUrl] : [];
   };
 
-  // 获取复习记录包含的所有图片
   const getRevisionImages = (rev: RevisionLog): string[] => {
     if (rev.imageUrls && rev.imageUrls.length > 0) {
       return rev.imageUrls;
@@ -451,7 +461,6 @@ export default function App() {
     }
   };
 
-  // 压缩并转换单张图片
   const compressImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -482,7 +491,6 @@ export default function App() {
     });
   };
 
-  // 📸 多图批量上传处理（支持连续累加）
   const handleMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -490,10 +498,9 @@ export default function App() {
       const compressedList = await Promise.all(fileList.map(file => compressImage(file)));
       setPreviewImages(prev => [...prev, ...compressedList]);
     }
-    e.target.value = ''; // 清空以允许重复选择同一张
+    e.target.value = '';
   };
 
-  // 📸 复习多图批量上传处理
   const handleReviewMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
@@ -503,6 +510,26 @@ export default function App() {
       setAiFeedback('');
     }
     e.target.value = '';
+  };
+
+  // 🏷️ 重命名文件夹/资料卡
+  const handleRenameItem = async (id: string, currentTitle?: string) => {
+    const promptTitle = prompt(t.enterNewTitle, currentTitle || '');
+    if (promptTitle !== null) {
+      const trimmedTitle = promptTitle.trim();
+      const updatedItems = items.map(item => {
+        if (item.id === id) {
+          return { ...item, title: trimmedTitle };
+        }
+        return item;
+      });
+      setItems(updatedItems);
+
+      await supabase
+        .from('knowledge_base')
+        .update({ title: trimmedTitle })
+        .eq('id', id);
+    }
   };
 
   // 🤖 核心功能：支持多图对比的 Gemini 批改纠错
@@ -528,7 +555,6 @@ export default function App() {
     try {
       const originalImages = getItemImages(activeModalItem.item);
 
-      // 1. 探测 API Key 支持的模型
       let candidateModels = [
         'gemini-3.6-flash',
         'gemini-2.5-flash',
@@ -562,6 +588,7 @@ export default function App() {
       const promptText = `
 你是一位极其资深且富有耐心的全科金牌名师。
 用户正在进行艾宾浩斯第 ${activeModalItem.stageNumber} 轮复习打卡。
+【资料名称】：${activeModalItem.item.title || activeModalItem.item.subject}
 前面提供的 ${originalImages.length} 张图片是【原始学习笔记/原题标准内容】；
 随后提供的 ${reviewNewImages.length} 张图片是【用户今天本次复习重写/答题的内容】。
 
@@ -575,7 +602,6 @@ export default function App() {
 
       const requestParts: any[] = [{ text: promptText }];
 
-      // 将所有原始笔记加入请求
       originalImages.forEach(imgData => {
         const base64 = imgData.split(',')[1];
         if (base64) {
@@ -585,7 +611,6 @@ export default function App() {
         }
       });
 
-      // 将所有复习答题图加入请求
       reviewNewImages.forEach(imgData => {
         const base64 = imgData.split(',')[1];
         if (base64) {
@@ -647,14 +672,17 @@ export default function App() {
     }
   };
 
-  // 保存多图卡片
+  // 保存新资料
   const handleSaveNewKnowledge = async () => {
     if (previewImages.length === 0 || !session) return;
 
+    const autoTitle = newTitle.trim() || `${selectedUploadSubject} 知识卡`;
+
     const newItemData = {
+      title: autoTitle,
       subject: selectedUploadSubject,
-      imageUrl: previewImages[0], // 兼容旧字段
-      imageUrls: previewImages,    // 多图数组
+      imageUrl: previewImages[0],
+      imageUrls: previewImages,
       uploadDate: getTodayStr(),
       revisions: [],
       user_id: session.user.id,
@@ -669,6 +697,7 @@ export default function App() {
     if (!error && data) {
       setItems([data[0], ...items]);
       setPreviewImages([]);
+      setNewTitle('');
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       fetchLeaderboard();
     } else {
@@ -676,7 +705,6 @@ export default function App() {
     }
   };
 
-  // 打卡完成（保存复习多图）
   const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber?: number) => {
     if (completedToday.includes(taskId)) return;
 
@@ -684,8 +712,8 @@ export default function App() {
     if (reviewNewImages.length > 0 && stageNumber) {
       updatedRevisions.push({
         stage: stageNumber,
-        imageUrl: reviewNewImages[0], // 兼容旧字段
-        imageUrls: reviewNewImages,    // 多图数组
+        imageUrl: reviewNewImages[0],
+        imageUrls: reviewNewImages,
         date: getTodayStr(),
         aiFeedback: aiFeedback || undefined,
       });
@@ -737,9 +765,16 @@ export default function App() {
     }
   };
 
-  const filteredDatabaseItems = selectedSubject === 'ALL'
-    ? items
-    : items.filter(item => item.subject === selectedSubject);
+  // 🔍 综合搜索与科目过滤
+  const filteredDatabaseItems = items.filter(item => {
+    const matchSubject = selectedSubject === 'ALL' || item.subject === selectedSubject;
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return matchSubject;
+
+    const matchTitle = (item.title || '').toLowerCase().includes(query);
+    const matchSubText = (item.subject || '').toLowerCase().includes(query);
+    return matchSubject && (matchTitle || matchSubText);
+  });
 
   if (authChecking) {
     return (
@@ -785,11 +820,20 @@ export default function App() {
             </div>
           )}
 
-          {/* 📸 上传新资料（多图模式） */}
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+          {/* 📸 上传新资料（命名 + 多图） */}
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
             <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
               {t.uploadTitle}
             </h2>
+
+            {/* 自定义名称输入框 */}
+            <input
+              type="text"
+              placeholder={t.titlePlaceholder}
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-all"
+            />
 
             <div className="flex gap-2 overflow-x-auto pb-1">
               {subjects.map(sub => (
@@ -813,7 +857,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* 上传选择框 */}
+            {/* 上传多图框 */}
             <label className="block border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 rounded-2xl p-4 text-center cursor-pointer transition-all">
               <span className="text-sm font-bold text-indigo-600">{t.clickUpload}</span>
               <input 
@@ -890,6 +934,7 @@ export default function App() {
                 {todayTasks.map(({ item, stageNumber }, index) => {
                   const taskId = `${item.id}_stage${stageNumber}`;
                   const isDone = completedToday.includes(taskId);
+                  const displayTitle = item.title || item.subject;
 
                   return (
                     <button
@@ -905,15 +950,15 @@ export default function App() {
                           : 'bg-green-500 hover:bg-green-600 text-white border-b-4 border-green-700 active:border-b-0 active:translate-y-1 shadow-md'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="bg-white/20 px-2.5 py-1 rounded-lg text-xs">
+                      <div className="flex items-center gap-3 truncate max-w-[70%]">
+                        <span className="bg-white/20 px-2.5 py-1 rounded-lg text-xs shrink-0">
                           #{index + 1}
                         </span>
-                        <span>
-                          [{item.subject}] {stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}
+                        <span className="truncate">
+                          [{item.subject}] {displayTitle} · {stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}
                         </span>
                       </div>
-                      <span>{isDone ? t.mastered : t.challenge}</span>
+                      <span className="shrink-0 text-xs">{isDone ? t.mastered : t.challenge}</span>
                     </button>
                   );
                 })}
@@ -921,13 +966,32 @@ export default function App() {
             )}
           </section>
 
-          {/* 📂 资料历史数据库 */}
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+          {/* 📂 资料历史数据库（支持实时检索） */}
+          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
                 {t.databaseTitle}
               </h2>
-              <span className="text-xs text-slate-400 font-bold">{items.length} 套</span>
+              <span className="text-xs text-slate-400 font-bold">{filteredDatabaseItems.length} 套</span>
+            </div>
+
+            {/* 🔍 搜索输入框 */}
+            <div className="relative">
+              <input
+                type="text"
+                placeholder={t.searchPlaceholder}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full p-2.5 pl-3 rounded-xl border border-slate-300 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 transition-all"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold"
+                >
+                  ✕
+                </button>
+              )}
             </div>
 
             <div className="flex gap-1.5 overflow-x-auto pb-1">
@@ -957,7 +1021,9 @@ export default function App() {
             </div>
 
             {filteredDatabaseItems.length === 0 ? (
-              <div className="text-center py-6 text-slate-400 text-xs">暂无资料</div>
+              <div className="text-center py-6 text-slate-400 text-xs">
+                {searchQuery ? '未找到相关资料' : '暂无资料'}
+              </div>
             ) : (
               <div className="grid grid-cols-2 gap-3">
                 {filteredDatabaseItems.map(item => {
@@ -965,11 +1031,12 @@ export default function App() {
                   const revImagesCount = item.revisions?.reduce((sum, rev) => sum + getRevisionImages(rev).length, 0) || 0;
                   const totalPhotos = itemImages.length + revImagesCount;
                   const coverImage = itemImages[0] || '';
+                  const displayTitle = item.title || `${item.subject} 资料`;
 
                   return (
                     <div 
                       key={item.id} 
-                      className="bg-slate-50 rounded-2xl p-2 border border-slate-200 flex flex-col space-y-2 group overflow-hidden"
+                      className="bg-slate-50 rounded-2xl p-2.5 border border-slate-200 flex flex-col space-y-1.5 group overflow-hidden"
                     >
                       <div 
                         onClick={() => setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' })}
@@ -985,19 +1052,38 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="flex justify-between items-center px-1">
-                        <span className="text-xs font-extrabold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md">
-                          {item.subject}
-                        </span>
-                        <span className="text-[10px] text-slate-400">{item.uploadDate}</span>
+                      {/* 标题展示与快捷重命名 */}
+                      <div className="px-0.5">
+                        <div 
+                          onClick={() => handleRenameItem(item.id, item.title)}
+                          className="font-bold text-xs text-slate-800 truncate cursor-pointer hover:text-indigo-600 flex items-center gap-1"
+                          title="点击可重命名"
+                        >
+                          <span className="truncate">{displayTitle}</span>
+                          <span className="text-[10px] text-slate-400 opacity-60">✏️</span>
+                        </div>
+                        <div className="flex justify-between items-center pt-0.5">
+                          <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
+                            {item.subject}
+                          </span>
+                          <span className="text-[9px] text-slate-400">{item.uploadDate}</span>
+                        </div>
                       </div>
 
-                      <button
-                        onClick={() => handleDeleteItem(item.id)}
-                        className="text-[10px] text-red-400 hover:text-red-600 text-right px-1 pt-0.5"
-                      >
-                        {t.deleteSet}
-                      </button>
+                      <div className="flex justify-between items-center px-0.5 pt-1 border-t border-slate-200/60">
+                        <button
+                          onClick={() => handleRenameItem(item.id, item.title)}
+                          className="text-[10px] text-slate-500 hover:text-indigo-600"
+                        >
+                          {t.renameSet}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteItem(item.id)}
+                          className="text-[10px] text-red-400 hover:text-red-600"
+                        >
+                          {t.deleteSet}
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -1079,8 +1165,8 @@ export default function App() {
         <main className="max-w-md mx-auto p-4 space-y-6">
           <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-5">
             <div className="text-center space-y-2">
-              <div className="w-20 h-20 rounded-3xl mx-auto overflow-hidden shadow-lg border-2 border-slate-200 bg-white p-1">
-              <img src="/app-logo.png" alt="App Logo" className="w-full h-full object-cover rounded-2xl" />
+              <div className="w-20 h-20 bg-green-500 rounded-3xl mx-auto flex items-center justify-center text-4xl shadow-lg border-b-4 border-green-700 pt-1">
+                🦉
               </div>
               <h2 className="font-extrabold text-lg text-slate-800">
                 {session?.user?.email}
@@ -1091,7 +1177,6 @@ export default function App() {
             </div>
 
             <div className="space-y-3 pt-2 border-t">
-              {/* 🔑 API Key 设置 */}
               <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
                 <div>
                   <p className="text-xs font-bold text-slate-700">{t.setApiKey}</p>
@@ -1196,7 +1281,7 @@ export default function App() {
         </main>
       )}
 
-      {/* 📌 底部固定 Navigation Bar */}
+      {/* 📌 底部导航栏 */}
       <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t-2 border-slate-200 px-6 py-2 shadow-2xl max-w-md mx-auto flex justify-around items-center">
         <button
           onClick={() => setCurrentTab('home')}
@@ -1234,8 +1319,8 @@ export default function App() {
         <div className="fixed inset-0 z-40 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center">
-              <span className="font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl text-xs">
-                {activeModalItem.item.subject} · {activeModalItem.stageNumber === 1 ? t.initialReview : t.dayStageText(activeModalItem.stageNumber)}
+              <span className="font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl text-xs truncate max-w-[200px]">
+                {activeModalItem.item.title || activeModalItem.item.subject} · {activeModalItem.stageNumber === 1 ? t.initialReview : t.dayStageText(activeModalItem.stageNumber)}
               </span>
               <button
                 onClick={() => {
@@ -1249,12 +1334,12 @@ export default function App() {
               </button>
             </div>
 
-            {/* 🎯 复习挑战与 AI 批改弹窗（多图版） */}
+            {/* 🎯 复习挑战与 AI 批改弹窗 */}
             {activeModalItem.type === 'review' && (
               <div className="space-y-4">
                 {/* 原始笔记多图展示 */}
                 <div className="space-y-1.5">
-                  <span className="text-xs font-bold text-slate-500">📌 原始学习笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
+                  <span className="text-xs font-bold text-slate-500">📌 原始笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
                   <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-100 rounded-2xl border">
                     {getItemImages(activeModalItem.item).map((img, idx) => (
                       <div 
@@ -1275,7 +1360,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 上传本次复习笔记（支持多图） */}
+                {/* 上传本次复习笔记 */}
                 <div className="space-y-2 border-t pt-3">
                   <label className="block border-2 border-dashed border-green-300 hover:border-green-500 bg-green-50/50 rounded-2xl p-2.5 text-center cursor-pointer transition-all">
                     <span className="text-xs font-bold text-green-700">
@@ -1361,14 +1446,13 @@ export default function App() {
               </div>
             )}
 
-            {/* 📂 资料库相册弹窗（支持多图浏览） */}
+            {/* 📂 资料库相册弹窗 */}
             {activeModalItem.type === 'viewFolder' && (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-                {/* 原始笔记全部多图 */}
                 <div className="bg-slate-50 rounded-2xl p-3 border space-y-2">
-                  <div className="flex justify-between text-xs text-slate-500 font-bold">
-                    <span>📌 原始学习笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
-                    <span>{activeModalItem.item.uploadDate}</span>
+                  <div className="flex justify-between items-center text-xs font-bold">
+                    <span className="text-slate-800">{activeModalItem.item.title || activeModalItem.item.subject}</span>
+                    <span className="text-slate-400">{activeModalItem.item.uploadDate}</span>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
                     {getItemImages(activeModalItem.item).map((img, idx) => (
@@ -1390,7 +1474,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 历次复习全部多图及 AI 点评 */}
                 {activeModalItem.item.revisions && activeModalItem.item.revisions.length > 0 && (
                   activeModalItem.item.revisions.map((rev, idx) => {
                     const revImgs = getRevisionImages(rev);
