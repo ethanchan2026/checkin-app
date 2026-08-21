@@ -22,6 +22,19 @@ const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
 const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
 
+// 🌐 常用时区配置列表
+const TIMEZONE_OPTIONS = [
+  { label: '北京 / 香港 / 台北 / 新加坡 (UTC+8)', value: 'Asia/Shanghai', offset: 8 },
+  { label: '东京 / 首尔 (UTC+9)', value: 'Asia/Tokyo', offset: 9 },
+  { label: '悉尼 / 墨尔本 (UTC+10)', value: 'Australia/Sydney', offset: 10 },
+  { label: '奥克兰 / 新西兰 (UTC+12)', value: 'Pacific/Auckland', offset: 12 },
+  { label: '伦敦 / 格林威治标准时间 (UTC+0)', value: 'Europe/London', offset: 0 },
+  { label: '巴黎 / 柏林 / 罗马 (UTC+1)', value: 'Europe/Paris', offset: 1 },
+  { label: '纽约 / 多伦多 (UTC-5)', value: 'America/New_York', offset: -5 },
+  { label: '芝加哥 (UTC-6)', value: 'America/Chicago', offset: -6 },
+  { label: '旧金山 / 洛杉矶 / 温哥华 (UTC-8)', value: 'America/Los_Angeles', offset: -8 },
+];
+
 interface RevisionLog {
   stage: number | string;
   imageUrl?: string;
@@ -101,7 +114,8 @@ const TRANSLATIONS = {
     aiResultTitle: '💡 Gemini 智能批改诊断报告',
     setApiKey: '🔑 设置 Gemini API Key',
     reminderTimeTitle: '⏰ 每日邮件提醒时间',
-    reminderTimeDesc: '设定每天接收打卡提醒的时间',
+    reminderTimeDesc: '设定每天接收打卡提醒的时间与所在时区',
+    timezoneTitle: '🌍 所在时区',
   },
   en: {
     home: 'Home',
@@ -151,7 +165,8 @@ const TRANSLATIONS = {
     aiResultTitle: '💡 Gemini AI Diagnostic Report',
     setApiKey: '🔑 Set Gemini API Key',
     reminderTimeTitle: '⏰ Daily Email Reminder Time',
-    reminderTimeDesc: 'Set preferred daily reminder time',
+    reminderTimeDesc: 'Set preferred daily reminder time and timezone',
+    timezoneTitle: '🌍 Timezone',
   }
 };
 
@@ -184,8 +199,9 @@ export default function App() {
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
 
-  // ⏰ 提醒时间状态
+  // ⏰ 提醒时间与时区状态
   const [reminderTime, setReminderTime] = useState<string>('08:00');
+  const [userTimezone, setUserTimezone] = useState<string>('Asia/Shanghai');
 
   // 🤖 API Key 与 AI 纠错状态
   const [userApiKey, setUserApiKey] = useState<string>(() => {
@@ -266,23 +282,35 @@ export default function App() {
     return [];
   });
 
-  // 获取用户个人设置
+  // 获取用户个人配置（提醒时间与时区）
   const fetchUserProfile = async () => {
     if (!session?.user?.id) return;
     const { data } = await supabase
       .from('user_profiles')
-      .select('reminder_time')
+      .select('reminder_time, timezone')
       .eq('user_id', session.user.id)
       .maybeSingle();
 
     if (data?.reminder_time) {
       setReminderTime(data.reminder_time);
     }
+    if (data?.timezone) {
+      setUserTimezone(data.timezone);
+    } else {
+      // 自动侦测当前设备本地时区（作为初始兜底推荐）
+      try {
+        const detectedTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (detectedTz && TIMEZONE_OPTIONS.some(tz => tz.value === detectedTz)) {
+          setUserTimezone(detectedTz);
+        }
+      } catch (e) {}
+    }
   };
 
-  // ⏰ 修改提醒时间函数定义
-  const handleUpdateReminderTime = async (newTime: string) => {
+  // ⏰ 保存提醒时间与时区
+  const handleSaveReminderSettings = async (newTime: string, newTz: string) => {
     setReminderTime(newTime);
+    setUserTimezone(newTz);
     if (!session?.user?.id) return;
 
     await supabase
@@ -291,6 +319,7 @@ export default function App() {
         user_id: session.user.id,
         user_email: session.user.email,
         reminder_time: newTime,
+        timezone: newTz,
         updated_at: new Date().toISOString(),
       });
   };
@@ -1205,18 +1234,36 @@ export default function App() {
             </div>
 
             <div className="space-y-3 pt-2 border-t">
-              {/* ⏰ 自定义每日邮件提醒时间 */}
-              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
-                <div>
-                  <p className="text-xs font-bold text-slate-700">{t.reminderTimeTitle}</p>
-                  <p className="text-[10px] text-slate-400">{t.reminderTimeDesc}</p>
+              {/* ⏰ 提醒时间与时区设置卡片 */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border space-y-3">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="text-xs font-bold text-slate-700">{t.reminderTimeTitle}</p>
+                    <p className="text-[10px] text-slate-400">{t.reminderTimeDesc}</p>
+                  </div>
+                  <input
+                    type="time"
+                    value={reminderTime}
+                    onChange={(e) => handleSaveReminderSettings(e.target.value, userTimezone)}
+                    className="text-xs font-extrabold bg-white border border-slate-300 rounded-xl px-2 py-1 text-slate-700 focus:outline-none focus:border-indigo-500"
+                  />
                 </div>
-                <input
-                  type="time"
-                  value={reminderTime}
-                  onChange={(e) => handleUpdateReminderTime(e.target.value)}
-                  className="text-xs font-extrabold bg-white border border-slate-300 rounded-xl px-2 py-1 text-slate-700 focus:outline-none focus:border-indigo-500"
-                />
+
+                {/* 🌍 时区下拉选择框 */}
+                <div className="pt-2 border-t border-slate-200/60 flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-slate-600 shrink-0">{t.timezoneTitle}</span>
+                  <select
+                    value={userTimezone}
+                    onChange={(e) => handleSaveReminderSettings(reminderTime, e.target.value)}
+                    className="w-full max-w-[200px] text-[11px] font-bold bg-white border border-slate-300 rounded-xl px-2 py-1.5 text-slate-700 focus:outline-none focus:border-indigo-500 truncate"
+                  >
+                    {TIMEZONE_OPTIONS.map(tz => (
+                      <option key={tz.value} value={tz.value}>
+                        {tz.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* 🔑 API Key 设置 */}
