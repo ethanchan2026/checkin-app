@@ -32,7 +32,7 @@ interface RevisionLog {
 
 interface KnowledgeItem {
   id: string;
-  title?: string; // 🏷️ 自定义卡片/文件夹名称
+  title?: string;
   subject: string;
   imageUrl?: string;
   imageUrls?: string[];
@@ -100,6 +100,8 @@ const TRANSLATIONS = {
     aiAnalyzing: '🤖 Gemini 正在深度比对与批改全部笔记中...',
     aiResultTitle: '💡 Gemini 智能批改诊断报告',
     setApiKey: '🔑 设置 Gemini API Key',
+    reminderTimeTitle: '⏰ 每日邮件提醒时间',
+    reminderTimeDesc: '设定每天接收打卡提醒的时间',
   },
   en: {
     home: 'Home',
@@ -148,6 +150,8 @@ const TRANSLATIONS = {
     aiAnalyzing: '🤖 Gemini is analyzing and correcting your notes...',
     aiResultTitle: '💡 Gemini AI Diagnostic Report',
     setApiKey: '🔑 Set Gemini API Key',
+    reminderTimeTitle: '⏰ Daily Email Reminder Time',
+    reminderTimeDesc: 'Set preferred daily reminder time',
   }
 };
 
@@ -179,6 +183,9 @@ export default function App() {
   const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
+
+  // ⏰ 提醒时间状态
+  const [reminderTime, setReminderTime] = useState<string>('08:00');
 
   // 🤖 API Key 与 AI 纠错状态
   const [userApiKey, setUserApiKey] = useState<string>(() => {
@@ -224,6 +231,7 @@ export default function App() {
       fetchData();
       fetchCustomSubjects();
       fetchLeaderboard();
+      fetchUserProfile();
     }
   }, [session]);
 
@@ -257,6 +265,35 @@ export default function App() {
 
     return [];
   });
+
+  // 获取用户个人设置
+  const fetchUserProfile = async () => {
+    if (!session?.user?.id) return;
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('reminder_time')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    if (data?.reminder_time) {
+      setReminderTime(data.reminder_time);
+    }
+  };
+
+  // ⏰ 修改提醒时间函数定义
+  const handleUpdateReminderTime = async (newTime: string) => {
+    setReminderTime(newTime);
+    if (!session?.user?.id) return;
+
+    await supabase
+      .from('user_profiles')
+      .upsert({
+        user_id: session.user.id,
+        user_email: session.user.email,
+        reminder_time: newTime,
+        updated_at: new Date().toISOString(),
+      });
+  };
 
   async function fetchCustomSubjects() {
     const { data, error } = await supabase
@@ -512,7 +549,6 @@ export default function App() {
     e.target.value = '';
   };
 
-  // 🏷️ 重命名文件夹/资料卡
   const handleRenameItem = async (id: string, currentTitle?: string) => {
     const promptTitle = prompt(t.enterNewTitle, currentTitle || '');
     if (promptTitle !== null) {
@@ -532,7 +568,6 @@ export default function App() {
     }
   };
 
-  // 🤖 核心功能：支持多图对比的 Gemini 批改纠错
   const handleGeminiCorrection = async () => {
     if (!activeModalItem || reviewNewImages.length === 0) {
       alert(lang === 'zh' ? '请先上传本次复习的笔记/答题照片！' : 'Please upload your review notes first!');
@@ -672,7 +707,6 @@ export default function App() {
     }
   };
 
-  // 保存新资料
   const handleSaveNewKnowledge = async () => {
     if (previewImages.length === 0 || !session) return;
 
@@ -765,7 +799,6 @@ export default function App() {
     }
   };
 
-  // 🔍 综合搜索与科目过滤
   const filteredDatabaseItems = items.filter(item => {
     const matchSubject = selectedSubject === 'ALL' || item.subject === selectedSubject;
     const query = searchQuery.trim().toLowerCase();
@@ -820,13 +853,12 @@ export default function App() {
             </div>
           )}
 
-          {/* 📸 上传新资料（命名 + 多图） */}
+          {/* 📸 上传新资料 */}
           <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
             <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
               {t.uploadTitle}
             </h2>
 
-            {/* 自定义名称输入框 */}
             <input
               type="text"
               placeholder={t.titlePlaceholder}
@@ -857,7 +889,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* 上传多图框 */}
             <label className="block border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 rounded-2xl p-4 text-center cursor-pointer transition-all">
               <span className="text-sm font-bold text-indigo-600">{t.clickUpload}</span>
               <input 
@@ -869,7 +900,6 @@ export default function App() {
               />
             </label>
 
-            {/* 多图预览九宫格 */}
             {previewImages.length > 0 && (
               <div className="space-y-3">
                 <div className="flex justify-between items-center px-1">
@@ -966,7 +996,7 @@ export default function App() {
             )}
           </section>
 
-          {/* 📂 资料历史数据库（支持实时检索） */}
+          {/* 📂 资料历史数据库 */}
           <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
             <div className="flex justify-between items-center">
               <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
@@ -975,7 +1005,6 @@ export default function App() {
               <span className="text-xs text-slate-400 font-bold">{filteredDatabaseItems.length} 套</span>
             </div>
 
-            {/* 🔍 搜索输入框 */}
             <div className="relative">
               <input
                 type="text"
@@ -1052,7 +1081,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* 标题展示与快捷重命名 */}
                       <div className="px-0.5">
                         <div 
                           onClick={() => handleRenameItem(item.id, item.title)}
@@ -1177,6 +1205,21 @@ export default function App() {
             </div>
 
             <div className="space-y-3 pt-2 border-t">
+              {/* ⏰ 自定义每日邮件提醒时间 */}
+              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
+                <div>
+                  <p className="text-xs font-bold text-slate-700">{t.reminderTimeTitle}</p>
+                  <p className="text-[10px] text-slate-400">{t.reminderTimeDesc}</p>
+                </div>
+                <input
+                  type="time"
+                  value={reminderTime}
+                  onChange={(e) => handleUpdateReminderTime(e.target.value)}
+                  className="text-xs font-extrabold bg-white border border-slate-300 rounded-xl px-2 py-1 text-slate-700 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {/* 🔑 API Key 设置 */}
               <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
                 <div>
                   <p className="text-xs font-bold text-slate-700">{t.setApiKey}</p>
@@ -1337,7 +1380,6 @@ export default function App() {
             {/* 🎯 复习挑战与 AI 批改弹窗 */}
             {activeModalItem.type === 'review' && (
               <div className="space-y-4">
-                {/* 原始笔记多图展示 */}
                 <div className="space-y-1.5">
                   <span className="text-xs font-bold text-slate-500">📌 原始笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
                   <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-100 rounded-2xl border">
@@ -1360,7 +1402,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 上传本次复习笔记 */}
                 <div className="space-y-2 border-t pt-3">
                   <label className="block border-2 border-dashed border-green-300 hover:border-green-500 bg-green-50/50 rounded-2xl p-2.5 text-center cursor-pointer transition-all">
                     <span className="text-xs font-bold text-green-700">
@@ -1375,7 +1416,6 @@ export default function App() {
                     />
                   </label>
 
-                  {/* 复习多图预览 */}
                   {reviewNewImages.length > 0 && (
                     <div className="space-y-2">
                       <div className="flex justify-between items-center px-1">
@@ -1409,7 +1449,6 @@ export default function App() {
                         ))}
                       </div>
 
-                      {/* 🤖 Gemini AI 纠错触发按钮 */}
                       <button
                         onClick={handleGeminiCorrection}
                         disabled={isAiAnalyzing}
@@ -1420,7 +1459,6 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* 💡 AI 批改诊断结果卡片 */}
                   {aiFeedback && (
                     <div className="bg-indigo-50/80 border-2 border-indigo-200 rounded-2xl p-3.5 space-y-1.5 text-xs text-slate-700">
                       <div className="font-extrabold text-indigo-700 flex items-center gap-1">
