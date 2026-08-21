@@ -1,155 +1,138 @@
-// scripts/daily-reminder.js (原生 Fetch 零依赖版本，不依赖任何第三方包)
+import { createClient } from '@supabase/supabase-js';
+import emailjs from '@emailjs/nodejs';
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY;
-const SENDER_EMAIL = process.env.SENDER_EMAIL || 'onboarding@resend.dev';
+const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
+const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
+const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
+const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
 
-console.log('==================================================');
-console.log('🚀 脚本已启动');
-console.log('1. 检查环境变量:');
-console.log(' - SUPABASE_URL:', SUPABASE_URL ? '✅ 已配置' : '❌ 缺失 (请在 GitHub Secrets 检查)');
-console.log(' - SUPABASE_SERVICE_ROLE_KEY:', SUPABASE_SERVICE_ROLE_KEY ? '✅ 已配置' : '❌ 缺失 (请在 GitHub Secrets 检查)');
-console.log(' - RESEND_API_KEY:', RESEND_API_KEY ? '✅ 已配置' : '❌ 缺失 (请在 GitHub Secrets 检查)');
-console.log(' - SENDER_EMAIL:', SENDER_EMAIL);
-
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !RESEND_API_KEY) {
-  console.error('❌ 致命错误：缺少关键环境变量，请检查 GitHub 仓库 Secrets 配置！');
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('❌ 缺少 Supabase 环境变量');
   process.exit(1);
 }
 
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
 
-function getBeijingTodayStr() {
-  const now = new Date();
-  const beijingTime = new Date(now.getTime() + (8 * 60 + now.getTimezoneOffset()) * 60000);
-  return beijingTime.toISOString().split('T')[0];
+function getTodayStr() {
+  return new Date().toISOString().split('T')[0];
 }
 
 function getDaysPassed(dateStr) {
-  if (!dateStr) return -1;
-  const cleanDateStr = dateStr.includes('T') ? dateStr.split('T')[0] : dateStr;
-  const start = new Date(cleanDateStr).getTime();
-  const today = new Date(getBeijingTodayStr()).getTime();
-  return Math.round((today - start) / (1000 * 60 * 60 * 24));
+  const start = new Date(dateStr).getTime();
+  const today = new Date(getTodayStr()).getTime();
+  return Math.floor((today - start) / (1000 * 60 * 60 * 24));
 }
 
-async function main() {
-  const todayStr = getBeijingTodayStr();
-  console.log(`2. 今日北京时间: [${todayStr}]，正在请求 Supabase 数据库...`);
+async function run() {
+  console.log('🚀 开始扫描今日复习任务...');
 
-  // 原生 REST API 请求 Supabase
-  let items = [];
-  try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/knowledge_base?select=*`, {
-      headers: {
-        'apikey': SUPABASE_SERVICE_ROLE_KEY,
-        'Authorization': `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-      },
+  // 1. 获取当前北京时间对应的小时（如 "08", "19", "21"）
+  const now = new Date();
+  const beijingHour = (now.getUTCHours() + 8) % 24;
+  const currentHourStr = String(beijingHour).padStart(2, '0');
+  console.log(`⏰ 当前北京时间约为 ${currentHourStr}:00，正在检索该时间段需提醒的用户...`);
+
+  // 2. 获取所有用户的个性化时间配置
+  const { data: profiles, error: profileErr } = await supabase
+    .from('user_profiles')
+    .select('user_id, reminder_time');
+
+  if (profileErr) {
+    console.warn('⚠️ 读取 user_profiles 失败或表不存在，将采用默认全量扫描:', profileErr.message);
+  }
+
+  // 建立用户提醒时间映射表（未设置的默认 08:00）
+  const userTimeMap = {};
+  if (profiles) {
+    profiles.forEach(p => {
+      userTimeMap[p.user_id] = p.reminder_time || '08:00';
     });
+  }
 
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error('❌ Supabase 请求失败:', res.status, errText);
-      process.exit(1);
-    }
+  // 3. 拉取所有资料卡片
+  const { data: items, error } = await supabase
+    .from('knowledge_base')
+    .select('*');
 
-    items = await res.json();
-    console.log(`3. 成功读取到 ${items.length} 条资料卡片`);
-  } catch (err) {
-    console.error('❌ 连接 Supabase 发生异常:', err);
+  if (error || !items) {
+    console.error('❌ 拉取知识库失败:', error);
     process.exit(1);
   }
 
-  if (items.length === 0) {
-    console.log('⚠️ 数据库中没有卡片，任务结束。');
-    return;
-  }
-
-  // 整理今日任务
+  // 4. 按用户归类待复习任务
   const userTasksMap = {};
 
-  items.forEach((item, index) => {
-    const itemDate = item.uploadDate || item.uploaddate || item.created_at;
-    const userEmail = item.user_email;
+  items.forEach(item => {
+    if (!item.user_email) return;
 
-    if (!userEmail || !itemDate) return;
+    // 检查该用户设置的提醒时间是否为当前小时
+    const userSetTime = userTimeMap[item.user_id] || '08:00';
+    const userTargetHour = userSetTime.split(':')[0];
 
-    const daysPassed = getDaysPassed(itemDate);
-    console.log(` - 卡片 #${index + 1} [${item.subject || '未命名'}] 上传日期: ${itemDate} -> 距今: ${daysPassed} 天 (用户: ${userEmail})`);
+    // 如果当前小时与用户设定的小时不符，跳过当前小时的推送
+    if (userTargetHour !== currentHourStr) {
+      return;
+    }
 
+    const daysPassed = getDaysPassed(item.uploadDate);
     let stageNumber = null;
-    const stageIndex = MILESTONE_INTERVALS.indexOf(daysPassed);
 
-    if (stageIndex !== -1) {
-      stageNumber = stageIndex + 1;
+    const milestoneIdx = MILESTONE_INTERVALS.indexOf(daysPassed);
+    if (milestoneIdx !== -1) {
+      stageNumber = milestoneIdx + 1;
     } else if (daysPassed > 25 && (daysPassed - 25) % 30 === 0) {
       stageNumber = 5 + Math.floor((daysPassed - 25) / 30);
     }
 
     if (stageNumber !== null) {
-      if (!userTasksMap[userEmail]) {
-        userTasksMap[userEmail] = [];
+      if (!userTasksMap[item.user_email]) {
+        userTasksMap[item.user_email] = [];
       }
-      userTasksMap[userEmail].push({
-        subject: item.subject || '复习任务',
-        stage: stageNumber,
-      });
+      const title = item.title || item.subject;
+      userTasksMap[item.user_email].push(`[${item.subject}] ${title} (第 ${stageNumber} 轮复习)`);
     }
   });
 
-  const userEmails = Object.keys(userTasksMap);
-  console.log(`4. 今日命中有复习任务的用户数: ${userEmails.length}`);
-
-  if (userEmails.length === 0) {
-    console.log('🎉 今日所有卡片均不在复习窗口内。');
+  const targetEmails = Object.keys(userTasksMap);
+  if (targetEmails.length === 0) {
+    console.log(`🎉 北京时间 ${currentHourStr}:00 无需发送提醒的用户或当前时间段无待复习任务。`);
     return;
   }
 
-  // 原生调用 Resend API 发送邮件
-  for (const email of userEmails) {
+  // 5. 组装并发送提醒邮件
+  for (const email of targetEmails) {
     const tasks = userTasksMap[email];
-    const taskListHtml = tasks
-      .map((t, idx) => `<li style="margin: 8px 0;"><strong>#${idx + 1} [${t.subject}]</strong> — 第 ${t.stage} 次复习</li>`)
-      .join('');
+    const taskListStr = tasks.map((t, idx) => `${idx + 1}. ${t}`).join('\n');
 
-    console.log(`5. 正在向 ${email} 发送包含 ${tasks.length} 个任务的邮件...`);
+    console.log(`✉️ 正在向 ${email} 发送 ${tasks.length} 项复习提醒...`);
 
     try {
-      const emailRes = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
+      await emailjs.send(
+        EMAILJS_SERVICE_ID,
+        EMAILJS_TEMPLATE_ID,
+        {
+          to_email: email,
+          user_email: email,
+          task_count: tasks.length,
+          task_list: taskListStr,
+          date: getTodayStr(),
         },
-        body: JSON.stringify({
-          from: `复习打卡提醒 <${SENDER_EMAIL}>`,
-          to: email,
-          subject: `🦉 今日打卡提醒：你有 ${tasks.length} 个复习任务待完成！`,
-          html: `
-            <div style="font-family: sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 16px;">
-              <h2 style="color: #22c55e;">🦉 艾宾浩斯复习打卡提醒</h2>
-              <p>Hi 学习达人，今天你有 <strong>${tasks.length}</strong> 个知识点需要复习：</p>
-              <ul style="background: #f8fafc; padding: 15px 30px; border-radius: 12px; color: #334155;">
-                ${taskListHtml}
-              </ul>
-              <p style="color: #64748b; font-size: 13px;">保持连胜天数，今天也要加油哦！💪</p>
-            </div>
-          `,
-        }),
-      });
-
-      const resendData = await emailRes.json();
-      if (!emailRes.ok) {
-        console.error(`❌ Resend 接口返回错误:`, resendData);
-      } else {
-        console.log(`🎉 邮件发送成功！Resend ID:`, resendData.id);
-      }
+        {
+          publicKey: EMAILJS_PUBLIC_KEY,
+          privateKey: EMAILJS_PRIVATE_KEY,
+        }
+      );
+      console.log(`✅ 成功发送至 ${email}`);
     } catch (err) {
-      console.error(`❌ 发信网络异常:`, err);
+      console.error(`❌ 发送至 ${email} 失败:`, err);
     }
   }
 
-  console.log('==================================================');
+  console.log('🎉 今日定时任务调度完成！');
 }
 
-main();
+run();
