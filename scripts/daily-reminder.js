@@ -13,11 +13,21 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+// 💡 关键配置：显式禁用 auth 持久化与 realtime websocket，避免服务端环境报错
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+  realtime: {
+    params: {
+      eventsPerSecond: 0,
+    },
+  },
+});
 
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
 
-// 辅助：获取某个时区下的当前小时（两位字符串，如 "08"）
 function getCurrentHourInTimezone(timezone = 'Asia/Shanghai') {
   try {
     const formatter = new Intl.DateTimeFormat('en-US', {
@@ -27,13 +37,11 @@ function getCurrentHourInTimezone(timezone = 'Asia/Shanghai') {
     });
     return formatter.format(new Date());
   } catch (e) {
-    // 发生异常时按 UTC+8 兜底
     const utcHour = new Date().getUTCHours();
     return String((utcHour + 8) % 24).padStart(2, '0');
   }
 }
 
-// 辅助：获取某个时区下的今日日期（YYYY-MM-DD）
 function getTodayStrInTimezone(timezone = 'Asia/Shanghai') {
   try {
     const formatter = new Intl.DateTimeFormat('en-CA', {
@@ -97,14 +105,11 @@ async function run() {
       timezone: 'Asia/Shanghai',
     };
 
-    // 获取该用户所在时区的当前小时与当前日期
     const userCurrentHour = getCurrentHourInTimezone(config.timezone);
     const userTodayStr = getTodayStrInTimezone(config.timezone);
-
-    // 用户设定的目标小时（如 "08"）
     const userTargetHour = config.reminder_time.split(':')[0];
 
-    // 如果用户所在时区的当前时刻不等于设定的小时，跳过本轮执行
+    // 如果用户所在时区的当前时刻与设定小时不符，跳过本轮
     if (userCurrentHour !== userTargetHour) {
       return;
     }
@@ -140,7 +145,7 @@ async function run() {
     return;
   }
 
-  // 4. 组装并发送个性化提醒邮件
+  // 4. 发送个性化提醒邮件
   for (const email of targetEmails) {
     const { tasks, todayStr, timezone } = userTasksMap[email];
     const taskListStr = tasks.map((t, idx) => `${idx + 1}. ${t}`).join('\n');
