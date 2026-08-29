@@ -116,6 +116,8 @@ const TRANSLATIONS = {
     reminderTimeTitle: '⏰ 每日邮件提醒时间',
     reminderTimeDesc: '设定每天接收打卡提醒的时间与所在时区',
     timezoneTitle: '🌍 所在时区',
+    newLevelReminderSent: '✅ 关卡已创建，提醒邮件已发送！',
+    newLevelReminderFailed: '关卡已创建，但提醒邮件发送失败',
   },
   en: {
     home: 'Home',
@@ -167,6 +169,8 @@ const TRANSLATIONS = {
     reminderTimeTitle: '⏰ Daily Email Reminder Time',
     reminderTimeDesc: 'Set preferred daily reminder time and timezone',
     timezoneTitle: '🌍 Timezone',
+    newLevelReminderSent: '✅ Level created and reminder email sent!',
+    newLevelReminderFailed: 'Level created, but the reminder email failed to send',
   }
 };
 
@@ -281,6 +285,32 @@ export default function App() {
 
     return [];
   });
+
+  const sendReviewReminderEmail = async (tasks: Array<{ item: KnowledgeItem; stageNumber: number }>) => {
+    const recipientEmail = session?.user?.email;
+    if (!recipientEmail) {
+      throw new Error(lang === 'zh' ? '当前账户没有可用邮箱' : 'No email address is available for this account');
+    }
+
+    const taskList = tasks
+      .map(({ item, stageNumber }, index) =>
+        `${index + 1}. [${item.subject}] ${item.title || item.subject} (${t.dayStageText(stageNumber)})`
+      )
+      .join('\n');
+
+    await emailjs.send(
+      EMAILJS_SERVICE_ID,
+      EMAILJS_TEMPLATE_ID,
+      {
+        to_email: recipientEmail,
+        user_email: recipientEmail,
+        task_count: tasks.length,
+        task_list: taskList,
+        date: getTodayStr(),
+      },
+      EMAILJS_PUBLIC_KEY
+    );
+  };
 
   // 获取用户个人配置（提醒时间与时区）
   const fetchUserProfile = async () => {
@@ -758,11 +788,21 @@ export default function App() {
       .select();
 
     if (!error && data) {
-      setItems([data[0], ...items]);
+      const createdItem = data[0] as KnowledgeItem;
+      setItems([createdItem, ...items]);
       setPreviewImages([]);
       setNewTitle('');
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       fetchLeaderboard();
+
+      try {
+        await sendReviewReminderEmail([{ item: createdItem, stageNumber: 1 }]);
+        alert(t.newLevelReminderSent);
+      } catch (err: any) {
+        console.error('新增关卡提醒邮件发送失败:', err);
+        const errorMessage = err?.text || err?.message || (lang === 'zh' ? '请检查邮件配置' : 'Please check the email configuration');
+        alert(`${t.newLevelReminderFailed}: ${errorMessage}`);
+      }
     } else {
       alert(`Error: ${error?.message}`);
     }

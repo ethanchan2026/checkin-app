@@ -7,9 +7,23 @@ const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
 const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
 const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
 const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
+const FORCE_SEND = process.env.FORCE_SEND === 'true';
+const TARGET_EMAIL = process.env.TARGET_EMAIL?.trim().toLowerCase() || '';
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('❌ 缺少 Supabase 环境变量');
+const requiredConfig = {
+  SUPABASE_URL,
+  SUPABASE_SERVICE_ROLE_KEY,
+  EMAILJS_SERVICE_ID,
+  EMAILJS_TEMPLATE_ID,
+  EMAILJS_PUBLIC_KEY,
+  EMAILJS_PRIVATE_KEY,
+};
+const missingConfig = Object.entries(requiredConfig)
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+
+if (missingConfig.length > 0) {
+  console.error(`❌ 缺少环境变量: ${missingConfig.join(', ')}`);
   process.exit(1);
 }
 
@@ -64,6 +78,9 @@ function getDaysPassed(dateStr, todayStr) {
 
 async function run() {
   console.log('🚀 开始基于多时区调度复习任务扫描...');
+  if (FORCE_SEND) {
+    console.log(`🧪 手动测试模式：忽略提醒时间，仅处理 ${TARGET_EMAIL || '全部用户'}。`);
+  }
 
   // 1. 获取所有用户的个性化配置（提醒时间 + 时区）
   const { data: profiles, error: profileErr } = await supabase
@@ -71,7 +88,7 @@ async function run() {
     .select('user_id, reminder_time, timezone');
 
   if (profileErr) {
-    console.warn('⚠️ 读取 user_profiles 失败或表不存在:', profileErr.message);
+    throw new Error(`读取 user_profiles 失败: ${profileErr.message}`);
   }
 
   const userConfigMap = {};
@@ -99,6 +116,7 @@ async function run() {
 
   items.forEach(item => {
     if (!item.user_email) return;
+    if (TARGET_EMAIL && item.user_email.toLowerCase() !== TARGET_EMAIL) return;
 
     const config = userConfigMap[item.user_id] || {
       reminder_time: '08:00',
@@ -110,7 +128,7 @@ async function run() {
     const userTargetHour = config.reminder_time.split(':')[0];
 
     // 如果用户所在时区的当前时刻与设定小时不符，跳过本轮
-    if (userCurrentHour !== userTargetHour) {
+    if (!FORCE_SEND && userCurrentHour !== userTargetHour) {
       return;
     }
 
@@ -141,11 +159,18 @@ async function run() {
 
   const targetEmails = Object.keys(userTasksMap);
   if (targetEmails.length === 0) {
-    console.log('🎉 当前整点各时区均无需发送提醒的用户或当前时间段无待复习任务。');
+    const message = FORCE_SEND
+      ? `手动测试未找到 ${TARGET_EMAIL || '任何用户'} 今天需要复习的关卡。`
+      : '当前整点各时区均无需发送提醒的用户或当前时间段无待复习任务。';
+    if (FORCE_SEND) {
+      throw new Error(message);
+    }
+    console.log(`🎉 ${message}`);
     return;
   }
 
   // 4. 发送个性化提醒邮件
+  let failedCount = 0;
   for (const email of targetEmails) {
     const { tasks, todayStr, timezone } = userTasksMap[email];
     const taskListStr = tasks.map((t, idx) => `${idx + 1}. ${t}`).join('\n');
@@ -170,11 +195,19 @@ async function run() {
       );
       console.log(`✅ 成功发送至 ${email}`);
     } catch (err) {
+      failedCount += 1;
       console.error(`❌ 发送至 ${email} 失败:`, err);
     }
+  }
+
+  if (failedCount > 0) {
+    throw new Error(`${failedCount} 封提醒邮件发送失败，请查看上方 EmailJS 错误。`);
   }
 
   console.log('🎉 定时任务调度完成！');
 }
 
-run();
+run().catch(error => {
+  console.error('❌ 提醒任务失败:', error);
+  process.exitCode = 1;
+});
