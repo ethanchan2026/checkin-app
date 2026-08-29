@@ -2,6 +2,36 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
+import {
+  ArrowRight,
+  Bell,
+  BookOpenCheck,
+  CalendarDays,
+  Check,
+  Flame,
+  FolderOpen,
+  GraduationCap,
+  Home,
+  ImageIcon,
+  KeyRound,
+  Languages,
+  LogOut,
+  Medal,
+  MessageSquareText,
+  Pencil,
+  Plus,
+  Search,
+  Settings2,
+  Sparkles,
+  Target,
+  Trash2,
+  Trophy,
+  UploadCloud,
+  UserRound,
+  UserX,
+  X,
+  Zap,
+} from 'lucide-react';
 import { Login } from './Login';
 
 // ========================================================
@@ -70,52 +100,52 @@ const TRANSLATIONS = {
     home: '主页',
     leaderboard: '排行榜',
     profile: '个人中心',
-    uploadTitle: '📸 上传新复习资料（可多选）',
+    uploadTitle: '上传新复习资料（可多选）',
     titlePlaceholder: '输入资料/卡片名称（如：三角函数诱导公式）',
-    clickUpload: '+ 点击添加笔记/原题照片（支持多选与累加）',
+    clickUpload: '点击添加笔记或原题照片',
     saveBtn: (count: number) => `保存 ${count} 张资料并生成复习关卡`,
-    todayTasks: '🎯 今日复习关卡',
-    noTasks: '🎉 今天没有需要复习的任务，快去上传新资料吧！',
-    databaseTitle: '📂 资料历史数据库',
-    searchPlaceholder: '🔍 搜索卡片名称或科目...',
+    todayTasks: '今日复习关卡',
+    noTasks: '今天没有需要复习的任务，快去上传新资料吧！',
+    databaseTitle: '资料历史数据库',
+    searchPlaceholder: '搜索卡片名称或科目...',
     all: '全部',
     addSubject: '+ 新增',
     deleteSet: '删除整套资料',
     renameSet: '重命名',
-    mastered: '✅ 已掌握',
-    challenge: '挑战 ➔',
-    nativeNotice: '🔔 系统原生通知',
+    mastered: '已掌握',
+    challenge: '开始挑战',
+    nativeNotice: '系统原生通知',
     enableNotice: '开启设备提醒权限',
     noticeEnabled: '通知权限已开启',
-    logout: '🚪 退出登录',
-    deleteAccount: '⚠️ 注销（删除）账户',
+    logout: '退出登录',
+    deleteAccount: '注销（删除）账户',
     deleteConfirm: '警告：注销账户将永久清空您在云端的所有卡片与复习历史记录且无法恢复，确定要注销吗？',
-    rankTitle: '🏆 学习达人排行榜',
-    myStats: '📊 你的学习战绩',
-    customSubTitle: '🏷️ 你的专属科目',
-    langSwitch: '🌐 语言切换 / Language',
+    rankTitle: '学习达人排行榜',
+    myStats: '你的学习战绩',
+    customSubTitle: '你的专属科目',
+    langSwitch: '语言切换 / Language',
     enterSubject: '输入新自定义科目名称：',
     enterNewTitle: '输入新的卡片/文件夹名称：',
-    reviewNotice: '📸 上传本次复习重写笔记/答题照片（可多选）',
-    completeBtn: '掌握知识点，打卡过关！ 🎉',
+    reviewNotice: '上传本次复习重写笔记或答题照片（可多选）',
+    completeBtn: '掌握知识点，打卡过关',
     close: '关闭',
     totalPhotos: '张笔记',
     clickToEnlarge: '🔍 点击查看原图',
-    feedbackTitle: '💬 问题反馈与建议',
+    feedbackTitle: '问题反馈与建议',
     feedbackPlaceholder: '遇到 Bug 或有好的建议？请告诉我们...',
-    submitFeedback: '提交建议发送至邮箱 ✉️',
+    submitFeedback: '提交建议',
     sending: '正在发送...',
     feedbackSuccess: '🎉 感谢你的反馈！建议已成功发送到开发者的邮箱。',
     noRankData: '尚无其他活跃用户，快去邀请朋友一起来打卡吧！',
     initialReview: '初次复习',
     dayStageText: (stage: number) => `第 ${stage} 次复习`,
-    aiCorrectionBtn: '🤖 让 Gemini AI 批改与纠错',
-    aiAnalyzing: '🤖 Gemini 正在深度比对与批改全部笔记中...',
-    aiResultTitle: '💡 Gemini 智能批改诊断报告',
-    setApiKey: '🔑 设置 Gemini API Key',
-    reminderTimeTitle: '⏰ 每日邮件提醒时间',
+    aiCorrectionBtn: '让 Gemini AI 批改与纠错',
+    aiAnalyzing: 'Gemini 正在深度比对与批改全部笔记中...',
+    aiResultTitle: 'Gemini 智能批改诊断报告',
+    setApiKey: '设置 Gemini API Key',
+    reminderTimeTitle: '每日邮件提醒时间',
     reminderTimeDesc: '设定每天接收打卡提醒的时间与所在时区',
-    timezoneTitle: '🌍 所在时区',
+    timezoneTitle: '所在时区',
     newLevelReminderSent: '✅ 关卡已创建，提醒邮件已发送！',
     newLevelReminderFailed: '关卡已创建，但提醒邮件发送失败',
   },
@@ -123,52 +153,52 @@ const TRANSLATIONS = {
     home: 'Home',
     leaderboard: 'Leaderboard',
     profile: 'Profile',
-    uploadTitle: '📸 Upload Study Materials (Multi-image)',
+    uploadTitle: 'Upload Study Materials (Multi-image)',
     titlePlaceholder: 'Enter title (e.g. Trig Formulas)',
     clickUpload: '+ Add Note Photos (Multi-select supported)',
     saveBtn: (count: number) => `Save ${count} Notes & Generate Levels`,
-    todayTasks: "🎯 Today's Review Levels",
-    noTasks: '🎉 No review tasks today. Go upload new materials!',
-    databaseTitle: '📂 Study Material Library',
-    searchPlaceholder: '🔍 Search by title or subject...',
+    todayTasks: "Today's Review Levels",
+    noTasks: 'No review tasks today. Go upload new materials!',
+    databaseTitle: 'Study Material Library',
+    searchPlaceholder: 'Search by title or subject...',
     all: 'All',
     addSubject: '+ Add',
     deleteSet: 'Delete Deck',
     renameSet: 'Rename',
-    mastered: '✅ Mastered',
-    challenge: 'Start ➔',
-    nativeNotice: '🔔 System Notification',
+    mastered: 'Mastered',
+    challenge: 'Start',
+    nativeNotice: 'System Notification',
     enableNotice: 'Enable Device Notification',
     noticeEnabled: 'Notification Enabled',
-    logout: '🚪 Sign Out',
-    deleteAccount: '⚠️ Delete Account Data',
+    logout: 'Sign Out',
+    deleteAccount: 'Delete Account Data',
     deleteConfirm: 'WARNING: This will permanently delete all your cards & study logs from the cloud. Are you sure?',
-    rankTitle: '🏆 Learning Leaderboard',
-    myStats: '📊 Your Learning Stats',
-    customSubTitle: '🏷️ Your Custom Subjects',
-    langSwitch: '🌐 Language / 语言切换',
+    rankTitle: 'Learning Leaderboard',
+    myStats: 'Your Learning Stats',
+    customSubTitle: 'Your Custom Subjects',
+    langSwitch: 'Language / 语言切换',
     enterSubject: 'Enter new custom subject name:',
     enterNewTitle: 'Enter new deck/card title:',
-    reviewNotice: '📸 Upload Review Photos (Multi-select)',
-    completeBtn: 'Mastered & Complete Level! 🎉',
+    reviewNotice: 'Upload Review Photos (Multi-select)',
+    completeBtn: 'Mastered & Complete Level',
     close: 'Close',
     totalPhotos: 'Notes',
     clickToEnlarge: '🔍 Tap to view fullscreen',
-    feedbackTitle: '💬 Feedback & Suggestions',
+    feedbackTitle: 'Feedback & Suggestions',
     feedbackPlaceholder: 'Encountered a bug or have ideas? Let us know...',
-    submitFeedback: 'Submit Feedback to Email ✉️',
+    submitFeedback: 'Submit Feedback',
     sending: 'Sending...',
     feedbackSuccess: '🎉 Thank you! Your feedback has been sent to the developer.',
     noRankData: 'No other active users yet. Invite your friends to join!',
     initialReview: 'Initial Review',
     dayStageText: (stage: number) => `Stage ${stage} Review`,
-    aiCorrectionBtn: '🤖 Grade & Correct with Gemini AI',
-    aiAnalyzing: '🤖 Gemini is analyzing and correcting your notes...',
-    aiResultTitle: '💡 Gemini AI Diagnostic Report',
-    setApiKey: '🔑 Set Gemini API Key',
-    reminderTimeTitle: '⏰ Daily Email Reminder Time',
+    aiCorrectionBtn: 'Grade & Correct with Gemini AI',
+    aiAnalyzing: 'Gemini is analyzing and correcting your notes...',
+    aiResultTitle: 'Gemini AI Diagnostic Report',
+    setApiKey: 'Set Gemini API Key',
+    reminderTimeTitle: 'Daily Email Reminder Time',
     reminderTimeDesc: 'Set preferred daily reminder time and timezone',
-    timezoneTitle: '🌍 Timezone',
+    timezoneTitle: 'Timezone',
     newLevelReminderSent: '✅ Level created and reminder email sent!',
     newLevelReminderFailed: 'Level created, but the reminder email failed to send',
   }
@@ -880,8 +910,11 @@ export default function App() {
 
   if (authChecking) {
     return (
-      <div className="min-h-screen bg-slate-900 text-white flex items-center justify-center text-xs animate-pulse font-sans">
-        🦉 正在同步云端数据...
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f6fa] font-sans">
+        <div className="flex items-center gap-3 rounded-2xl border border-[#e5e7ef] bg-white px-5 py-4 text-xs font-bold text-[#676b7e] shadow-[0_14px_38px_rgba(31,35,55,0.08)]">
+          <span className="grid h-8 w-8 animate-pulse place-items-center rounded-xl bg-[#635bff] text-white"><Check size={17} /></span>
+          {lang === 'zh' ? '正在同步云端数据...' : 'Syncing cloud data...'}
+        </div>
       </div>
     );
   }
@@ -891,49 +924,134 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-100 text-slate-800 pb-24 font-sans">
-      {/* 顶部状态栏 */}
-      <header className="sticky top-0 z-20 bg-white border-b-2 border-slate-200 px-4 py-3 flex justify-between items-center shadow-sm">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-1 font-extrabold text-orange-500 text-lg">
-            🔥 <span>{streak}</span>
+    <div className="min-h-screen bg-[#f5f6fa] text-[#1b1d2a] font-sans lg:pl-60">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-[#e8eaf1] bg-white/95 px-4 py-6 backdrop-blur-xl lg:flex">
+        <div className="flex items-center gap-3 px-2 pb-8">
+          <div className="grid h-10 w-10 place-items-center rounded-[14px] bg-gradient-to-br from-[#7770ff] to-[#5148ef] text-white shadow-[0_10px_24px_rgba(99,91,255,0.28)]">
+            <Check size={22} strokeWidth={2.2} />
           </div>
-          <div className="flex items-center gap-1 font-extrabold text-yellow-500 text-lg">
-            ⚡ <span>{xp} XP</span>
+          <div>
+            <p className="text-sm font-black tracking-tight">1357 {lang === 'zh' ? '学习' : 'Study'}</p>
+            <p className="mt-0.5 text-[10px] font-semibold text-[#8b90a3]">Review smarter, daily</p>
           </div>
         </div>
 
+        <p className="px-3 pb-2 text-[10px] font-black uppercase tracking-[0.16em] text-[#a1a5b5]">
+          {lang === 'zh' ? '主要功能' : 'Navigation'}
+        </p>
+        <nav className="space-y-1.5">
+          {([
+            { key: 'home' as const, label: t.home, icon: Home },
+            { key: 'leaderboard' as const, label: t.leaderboard, icon: Trophy },
+            { key: 'profile' as const, label: t.profile, icon: UserRound },
+          ]).map(({ key, label, icon: NavIcon }) => (
+            <button
+              key={key}
+              onClick={() => setCurrentTab(key)}
+              className={`flex w-full items-center gap-3 rounded-[14px] px-3 py-3 text-left text-xs font-extrabold transition-all ${
+                currentTab === key
+                  ? 'bg-[#efefff] text-[#635bff]'
+                  : 'text-[#6f7386] hover:bg-[#f7f8fb] hover:text-[#2d3040]'
+              }`}
+            >
+              <NavIcon size={18} strokeWidth={2} />
+              <span>{label}</span>
+              {key === 'home' && todayTasks.length > 0 && (
+                <span className="ml-auto rounded-full bg-white px-2 py-0.5 text-[9px] text-[#635bff]">{todayTasks.length}</span>
+              )}
+            </button>
+          ))}
+        </nav>
+
+        <div className="mt-auto rounded-[18px] bg-gradient-to-br from-[#2c2d3a] to-[#1d1f2b] p-4 text-white shadow-[0_14px_28px_rgba(24,25,34,0.2)]">
+          <div className="flex items-center justify-between text-[10px] font-bold text-white/65">
+            <span>{lang === 'zh' ? '本周学习目标' : 'Weekly goal'}</span>
+            <Flame size={16} />
+          </div>
+          <div className="mt-2 flex items-end gap-1.5">
+            <strong className="text-3xl font-black">{streak}</strong>
+            <span className="pb-1 text-[10px] text-white/65">{lang === 'zh' ? '天连续学习' : 'day streak'}</span>
+          </div>
+          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
+            <div className="h-full rounded-full bg-gradient-to-r from-[#8a83ff] to-[#b7b3ff]" style={{ width: `${Math.min(100, (streak / 10) * 100)}%` }} />
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-3 px-2">
+          <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e9e7ff] text-[11px] font-black text-[#635bff]">
+            {(session?.user?.email || 'U').slice(0, 2).toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-extrabold">{session?.user?.email?.split('@')[0]}</p>
+            <p className="text-[9px] font-semibold text-[#8b90a3]">PRO {lang === 'zh' ? '学习者' : 'learner'}</p>
+          </div>
+        </div>
+      </aside>
+
+      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-[#e8eaf1]/80 bg-[#f5f6fa]/85 px-4 backdrop-blur-xl sm:px-6 lg:h-[76px] lg:px-8">
+        <div>
+          <p className="text-sm font-black">{lang === 'zh' ? '学习工作台' : 'Study workspace'}</p>
+          <p className="mt-0.5 hidden text-[10px] font-semibold text-[#858a9d] sm:block">
+            {lang === 'zh' ? '保持节奏，每天进步一点' : 'Keep your rhythm and improve daily'}
+          </p>
+        </div>
         <div className="flex items-center gap-2">
+          <div className="hidden h-9 items-center gap-1.5 rounded-xl border border-[#e5e7ef] bg-white px-3 text-[10px] font-black text-[#515568] sm:flex">
+            <Flame size={15} className="text-[#ef8d32]" /><span>{streak}</span>
+          </div>
+          <div className="flex h-9 items-center gap-1.5 rounded-xl border border-[#e5e7ef] bg-white px-3 text-[10px] font-black text-[#515568]">
+            <Zap size={15} className="text-[#e8a02d]" /><span>{xp} XP</span>
+          </div>
+          <button onClick={requestNativeNotification} className="grid h-9 w-9 place-items-center rounded-xl border border-[#e5e7ef] bg-white text-[#5e6275] transition hover:border-[#bcb8ff] hover:text-[#635bff]" aria-label="Notifications">
+            <Bell size={16} />
+          </button>
           <button
             onClick={toggleLanguage}
-            className="text-xs bg-slate-100 hover:bg-slate-200 font-extrabold px-2.5 py-1 rounded-xl transition-all border border-slate-300"
+            className="flex h-9 items-center gap-1.5 rounded-xl border border-[#e5e7ef] bg-white px-3 text-[10px] font-black text-[#515568] transition hover:border-[#bcb8ff] hover:text-[#635bff]"
           >
-            🌐 {lang === 'zh' ? 'EN' : '中文'}
+            <Languages size={14} /> {lang === 'zh' ? 'EN' : '中文'}
           </button>
         </div>
       </header>
 
       {/* 1. 🏠 主页 */}
       {currentTab === 'home' && (
-        <main className="max-w-md mx-auto p-4 space-y-6">
+        <main className="mx-auto grid w-full max-w-[1260px] grid-cols-1 gap-5 px-4 py-6 pb-28 sm:px-6 lg:px-8 lg:pb-10 xl:grid-cols-3">
+          <div className="flex items-end justify-between xl:col-span-3">
+            <div>
+              <h1 className="text-2xl font-black tracking-[-0.04em] text-[#191b28] sm:text-3xl">
+                {lang === 'zh' ? '继续今天的学习' : 'Continue today’s learning'}
+              </h1>
+              <p className="mt-2 text-[11px] font-medium text-[#7c8194]">
+                {lang === 'zh'
+                  ? `你有 ${todayTasks.length} 个复习关卡等待完成，保持今天的学习节奏。`
+                  : `${todayTasks.length} review level${todayTasks.length === 1 ? '' : 's'} waiting for you today.`}
+              </p>
+            </div>
+            <div className="hidden items-center gap-2 rounded-xl border border-[#e5e7ef] bg-white px-3 py-2 text-[10px] font-bold text-[#757a8e] sm:flex">
+              <CalendarDays size={15} /> {new Date().toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+            </div>
+          </div>
+
           {loading && (
-            <div className="text-center py-2 text-xs text-indigo-500 font-bold animate-pulse">
-              🔄 正在同步云端资料...
+            <div className="rounded-xl bg-[#efefff] py-2 text-center text-xs font-bold text-[#635bff] animate-pulse xl:col-span-3">
+              {lang === 'zh' ? '正在同步云端资料...' : 'Syncing cloud data...'}
             </div>
           )}
 
           {/* 📸 上传新资料 */}
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
-            <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
-              {t.uploadTitle}
-            </h2>
+          <section className="order-2 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-2">
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Plus size={18} /></div>
+              <div><h2 className="text-sm font-black">{lang === 'zh' ? '新建学习卡' : 'Create study card'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '上传资料并生成复习计划' : 'Upload notes and build a review plan'}</p></div>
+            </div>
 
             <input
               type="text"
               placeholder={t.titlePlaceholder}
               value={newTitle}
               onChange={(e) => setNewTitle(e.target.value)}
-              className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:border-indigo-500 transition-all"
+              className="h-11 w-full rounded-xl border border-[#e2e4ec] bg-[#f8f9fc] px-3 text-[11px] text-[#292c3b] outline-none transition placeholder:text-[#a2a6b6] focus:border-[#aaa5ff] focus:ring-4 focus:ring-[#efefff]"
             />
 
             <div className="flex gap-2 overflow-x-auto pb-1">
@@ -943,8 +1061,8 @@ export default function App() {
                   onClick={() => setSelectedUploadSubject(sub)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
                     selectedUploadSubject === sub
-                      ? 'bg-indigo-500 text-white shadow-md'
-                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      ? 'bg-[#efefff] text-[#635bff]'
+                      : 'bg-[#f7f8fb] text-[#767b8e] hover:bg-[#f0f1f6]'
                   }`}
                 >
                   {sub}
@@ -952,14 +1070,16 @@ export default function App() {
               ))}
               <button
                 onClick={handleAddCustomSubject}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-600 hover:bg-indigo-100 shrink-0 border border-indigo-200"
+                className="flex shrink-0 items-center gap-1 rounded-xl border border-[#dedcff] bg-white px-3 py-1.5 text-xs font-bold text-[#635bff] hover:bg-[#efefff]"
               >
-                {t.addSubject}
+                <Plus size={12} /> {t.addSubject.replace('+ ', '')}
               </button>
             </div>
 
-            <label className="block border-2 border-dashed border-indigo-200 hover:border-indigo-400 bg-indigo-50/50 rounded-2xl p-4 text-center cursor-pointer transition-all">
-              <span className="text-sm font-bold text-indigo-600">{t.clickUpload}</span>
+            <label className="block cursor-pointer rounded-2xl border border-dashed border-[#cfd2df] bg-[#fbfbfd] p-5 text-center transition-all hover:border-[#9b95ff] hover:bg-[#f5f4ff]">
+              <span className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-xl bg-white text-[#635bff] shadow-sm"><UploadCloud size={19} /></span>
+              <span className="block text-[11px] font-extrabold text-[#4b4f62]">{t.clickUpload}</span>
+              <span className="mt-1 block text-[9px] font-medium text-[#969aac]">JPG、PNG · {lang === 'zh' ? '支持多图上传' : 'Multiple images supported'}</span>
               <input 
                 type="file" 
                 accept="image/*" 
@@ -1007,7 +1127,7 @@ export default function App() {
 
                 <button
                   onClick={handleSaveNewKnowledge}
-                  className="w-full py-3 bg-green-500 hover:bg-green-600 text-white font-extrabold rounded-2xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all shadow-lg text-sm"
+                  className="w-full rounded-xl bg-[#635bff] py-3 text-xs font-extrabold text-white shadow-[0_9px_20px_rgba(99,91,255,0.24)] transition hover:bg-[#554ce8] disabled:opacity-50"
                 >
                   {t.saveBtn(previewImages.length)}
                 </button>
@@ -1016,20 +1136,23 @@ export default function App() {
           </section>
 
           {/* 🎯 今日复习关卡 */}
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
+          <section className="order-1 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 xl:col-span-2 xl:col-start-1 xl:row-start-2">
             <div className="flex justify-between items-center">
-              <h2 className="font-bold text-lg text-slate-700">{t.todayTasks}</h2>
-              <span className="text-xs bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full font-bold">
+              <div className="flex items-center gap-3">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Target size={18} /></div>
+                <div><h2 className="text-sm font-black">{t.todayTasks}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '根据 1357 记忆节奏生成' : 'Built from your 1357 review rhythm'}</p></div>
+              </div>
+              <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">
                 {todayTasks.length} 关卡
               </span>
             </div>
 
             {todayTasks.length === 0 ? (
-              <div className="text-center py-8 text-slate-400 text-sm font-medium">
+              <div className="rounded-2xl bg-[#f8f9fc] py-10 text-center text-xs font-medium text-[#9195a7]">
                 {t.noTasks}
               </div>
             ) : (
-              <div className="flex flex-col items-center gap-3 py-1">
+              <div className="flex flex-col gap-3 py-1">
                 {todayTasks.map(({ item, stageNumber }, index) => {
                   const taskId = `${item.id}_stage${stageNumber}`;
                   const isDone = completedToday.includes(taskId);
@@ -1043,51 +1166,60 @@ export default function App() {
                         setAiFeedback('');
                         setActiveModalItem({ item, stageNumber, type: 'review' });
                       }}
-                      className={`w-full p-4 rounded-2xl font-extrabold flex justify-between items-center transition-all ${
+                      className={`group relative flex w-full items-center justify-between overflow-hidden rounded-[18px] p-5 text-left font-extrabold transition-all ${
                         isDone
-                          ? 'bg-slate-100 text-slate-400 border-2 border-slate-200'
-                          : 'bg-green-500 hover:bg-green-600 text-white border-b-4 border-green-700 active:border-b-0 active:translate-y-1 shadow-md'
+                          ? 'border border-[#e6e8ef] bg-[#f7f8fb] text-[#989cad]'
+                          : 'bg-gradient-to-br from-[#6860ff] via-[#5d55ef] to-[#4b43d3] text-white shadow-[0_12px_25px_rgba(78,68,211,0.24)] hover:-translate-y-0.5'
                       }`}
                     >
-                      <div className="flex items-center gap-3 truncate max-w-[70%]">
-                        <span className="bg-white/20 px-2.5 py-1 rounded-lg text-xs shrink-0">
-                          #{index + 1}
-                        </span>
-                        <span className="truncate">
-                          [{item.subject}] {displayTitle} · {stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}
-                        </span>
+                      <div className="min-w-0 pr-4">
+                        <div className="mb-2 flex items-center gap-2 text-[9px] font-bold opacity-80"><span className="rounded-lg bg-white/15 px-2 py-1">第 {index + 1} 关</span><span>{stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}</span></div>
+                        <p className="truncate text-base font-black sm:text-lg">{displayTitle}</p>
+                        <p className="mt-1 truncate text-[10px] font-semibold opacity-70">{item.subject} · {lang === 'zh' ? '回顾笔记并完成一次主动复述' : 'Review notes and complete an active recall'}</p>
                       </div>
-                      <span className="shrink-0 text-xs">{isDone ? t.mastered : t.challenge}</span>
+                      <span className={`flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-black ${isDone ? 'bg-white text-[#7d8193]' : 'bg-white text-[#5148df]'}`}>
+                        {isDone ? <Check size={14} /> : <ArrowRight size={14} />} {isDone ? t.mastered : t.challenge}
+                      </span>
                     </button>
                   );
                 })}
+                <div className="mt-1 grid grid-cols-5 gap-2 overflow-x-auto pb-1">
+                  {MILESTONE_INTERVALS.map((day, index) => (
+                    <div key={day} className={`min-w-[72px] rounded-xl border px-2 py-2.5 text-center ${index === 0 ? 'border-[#dcd9ff] bg-[#efefff] text-[#635bff]' : 'border-transparent bg-[#f8f9fc] text-[#757a8d]'}`}>
+                      <strong className="block text-[10px] font-black">{day === 0 ? (lang === 'zh' ? '今天' : 'Today') : `+${day} ${lang === 'zh' ? '天' : 'd'}`}</strong>
+                      <span className="mt-0.5 block text-[8px] font-semibold">{index === 0 ? t.initialReview : t.dayStageText(index + 1)}</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </section>
 
           {/* 📂 资料历史数据库 */}
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-3.5">
+          <section className="order-3 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 xl:col-span-2 xl:col-start-1">
             <div className="flex justify-between items-center">
-              <h2 className="font-bold text-lg text-slate-700 flex items-center gap-2">
-                {t.databaseTitle}
-              </h2>
-              <span className="text-xs text-slate-400 font-bold">{filteredDatabaseItems.length} 套</span>
+              <div className="flex items-center gap-3">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e9f8f2] text-[#16a776]"><FolderOpen size={18} /></div>
+                <div><h2 className="text-sm font-black">{t.databaseTitle}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '管理所有知识卡与复习记录' : 'Manage cards and review history'}</p></div>
+              </div>
+              <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">{filteredDatabaseItems.length} 套</span>
             </div>
 
-            <div className="relative">
+            <div className="relative flex items-center">
+              <Search size={15} className="pointer-events-none absolute left-3 text-[#9da1b2]" />
               <input
                 type="text"
                 placeholder={t.searchPlaceholder}
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full p-2.5 pl-3 rounded-xl border border-slate-300 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 transition-all"
+                className="h-10 w-full rounded-xl border border-[#e2e4ec] bg-[#f8f9fc] pl-9 pr-10 text-[11px] text-[#292c3b] outline-none transition placeholder:text-[#a2a6b6] focus:border-[#aaa5ff] focus:ring-4 focus:ring-[#efefff]"
               />
               {searchQuery && (
                 <button
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-3 top-2.5 text-xs text-slate-400 hover:text-slate-600 font-bold"
+                  className="absolute right-3 text-[#9296a8] hover:text-[#4c5062]"
                 >
-                  ✕
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -1097,8 +1229,8 @@ export default function App() {
                 onClick={() => setSelectedSubject('ALL')}
                 className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
                   selectedSubject === 'ALL'
-                    ? 'bg-slate-800 text-white'
-                    : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                    ? 'bg-[#272936] text-white'
+                    : 'bg-[#f7f8fb] text-[#757a8d] hover:bg-[#eff0f5]'
                 }`}
               >
                 {t.all}
@@ -1109,8 +1241,8 @@ export default function App() {
                   onClick={() => setSelectedSubject(sub)}
                   className={`px-3 py-1 rounded-xl text-xs font-bold shrink-0 transition-all ${
                     selectedSubject === sub
-                      ? 'bg-slate-800 text-white'
-                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                      ? 'bg-[#272936] text-white'
+                      : 'bg-[#f7f8fb] text-[#757a8d] hover:bg-[#eff0f5]'
                   }`}
                 >
                   {sub}
@@ -1123,7 +1255,7 @@ export default function App() {
                 {searchQuery ? '未找到相关资料' : '暂无资料'}
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                 {filteredDatabaseItems.map(item => {
                   const itemImages = getItemImages(item);
                   const revImagesCount = item.revisions?.reduce((sum, rev) => sum + getRevisionImages(rev).length, 0) || 0;
@@ -1134,19 +1266,19 @@ export default function App() {
                   return (
                     <div 
                       key={item.id} 
-                      className="bg-slate-50 rounded-2xl p-2.5 border border-slate-200 flex flex-col space-y-1.5 group overflow-hidden"
+                      className="group flex flex-col space-y-2 overflow-hidden rounded-2xl border border-[#e5e7ef] bg-white p-2.5 transition-all hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(31,35,55,0.09)]"
                     >
                       <div 
                         onClick={() => setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' })}
-                        className="relative cursor-pointer overflow-hidden rounded-xl bg-slate-200 h-28 w-full shrink-0"
+                        className="relative h-32 w-full shrink-0 cursor-pointer overflow-hidden rounded-xl bg-[#f1f2f7]"
                       >
                         <img 
                           src={coverImage} 
                           alt="Cover" 
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200 block" 
                         />
-                        <div className="absolute top-2 right-2 bg-black/70 text-white text-[10px] font-extrabold px-2 py-0.5 rounded-full backdrop-blur-sm">
-                          📁 {totalPhotos} {t.totalPhotos}
+                        <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-[#2b2e3d]/80 px-2 py-1 text-[9px] font-extrabold text-white backdrop-blur-sm">
+                          <ImageIcon size={11} /> {totalPhotos} {t.totalPhotos}
                         </div>
                       </div>
 
@@ -1157,7 +1289,7 @@ export default function App() {
                           title="点击可重命名"
                         >
                           <span className="truncate">{displayTitle}</span>
-                          <span className="text-[10px] text-slate-400 opacity-60">✏️</span>
+                          <Pencil size={11} className="shrink-0 text-[#a0a4b4]" />
                         </div>
                         <div className="flex justify-between items-center pt-0.5">
                           <span className="text-[10px] font-extrabold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded">
@@ -1170,15 +1302,15 @@ export default function App() {
                       <div className="flex justify-between items-center px-0.5 pt-1 border-t border-slate-200/60">
                         <button
                           onClick={() => handleRenameItem(item.id, item.title)}
-                          className="text-[10px] text-slate-500 hover:text-indigo-600"
+                          className="flex items-center gap-1 text-[9px] font-bold text-[#777c8f] hover:text-[#635bff]"
                         >
-                          {t.renameSet}
+                          <Pencil size={11} /> {t.renameSet}
                         </button>
                         <button
                           onClick={() => handleDeleteItem(item.id)}
-                          className="text-[10px] text-red-400 hover:text-red-600"
+                          className="flex items-center gap-1 text-[9px] font-bold text-[#d87070] hover:text-red-600"
                         >
-                          {t.deleteSet}
+                          <Trash2 size={11} /> {t.deleteSet}
                         </button>
                       </div>
                     </div>
@@ -1187,32 +1319,50 @@ export default function App() {
               </div>
             )}
           </section>
+
+          <section className="order-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-3">
+            <div className="flex items-center gap-3">
+              <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff4e5] text-[#e89a2e]"><BookOpenCheck size={18} /></div>
+              <div><h2 className="text-sm font-black">{lang === 'zh' ? '学习概览' : 'Learning overview'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '今天的实时学习进度' : 'Your live progress today'}</p></div>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <div className="rounded-2xl bg-[#f8f9fc] p-4"><span className="text-[9px] font-semibold text-[#8b90a3]">{lang === 'zh' ? '资料总数' : 'Total cards'}</span><strong className="mt-1 block text-xl font-black">{items.length}</strong></div>
+              <div className="rounded-2xl bg-[#f8f9fc] p-4"><span className="text-[9px] font-semibold text-[#8b90a3]">{lang === 'zh' ? '今日完成' : 'Done today'}</span><strong className="mt-1 block text-xl font-black text-[#16a776]">{completedToday.length}</strong></div>
+              <div className="rounded-2xl bg-[#f8f9fc] p-4"><span className="text-[9px] font-semibold text-[#8b90a3]">{lang === 'zh' ? '连续学习' : 'Streak'}</span><strong className="mt-1 flex items-center gap-1 text-xl font-black"><Flame size={17} className="text-[#ef8d32]" />{streak}</strong></div>
+              <div className="rounded-2xl bg-[#f8f9fc] p-4"><span className="text-[9px] font-semibold text-[#8b90a3]">{lang === 'zh' ? '累计经验' : 'Total XP'}</span><strong className="mt-1 flex items-center gap-1 text-xl font-black"><Zap size={17} className="text-[#e8a02d]" />{xp}</strong></div>
+            </div>
+            <div className="mt-4 rounded-2xl bg-[#efefff] p-4">
+              <div className="flex items-center justify-between text-[9px] font-bold text-[#6963c9]"><span>{lang === 'zh' ? '今日关卡完成率' : 'Today completion'}</span><span>{todayTasks.length === 0 ? 100 : Math.round((completedToday.length / todayTasks.length) * 100)}%</span></div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-white"><div className="h-full rounded-full bg-[#635bff]" style={{ width: `${todayTasks.length === 0 ? 100 : Math.min(100, (completedToday.length / todayTasks.length) * 100)}%` }} /></div>
+            </div>
+          </section>
         </main>
       )}
 
       {/* 2. 🏆 排行榜 */}
       {currentTab === 'leaderboard' && (
-        <main className="max-w-md mx-auto p-4 space-y-6">
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-4">
-            <h2 className="font-extrabold text-xl text-slate-800 text-center flex items-center justify-center gap-2">
-              {t.rankTitle}
-            </h2>
+        <main className="mx-auto w-full max-w-[1000px] px-4 py-6 pb-28 sm:px-6 lg:px-8 lg:pb-10">
+          <section className="space-y-5 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-7">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-[14px] bg-[#fff4e5] text-[#e89a2e]"><Trophy size={20} /></div>
+              <div><h2 className="text-lg font-black">{t.rankTitle}</h2><p className="mt-0.5 text-[10px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '和所有学习者一起保持进步' : 'Keep progressing with every learner'}</p></div>
+            </div>
 
-            <div className="bg-gradient-to-r from-orange-400 to-amber-500 text-white rounded-2xl p-4 flex justify-between items-center shadow-lg">
+            <div className="flex items-center justify-between rounded-[20px] bg-gradient-to-br from-[#6860ff] to-[#4b43d3] p-5 text-white shadow-[0_14px_28px_rgba(78,68,211,0.24)]">
               <div>
-                <p className="text-xs font-bold opacity-80">{t.myStats}</p>
-                <p className="text-sm font-extrabold truncate max-w-[180px]">
+                <p className="text-[10px] font-bold opacity-70">{t.myStats}</p>
+                <p className="mt-1 max-w-[220px] truncate text-sm font-extrabold">
                   {session?.user?.email}
                 </p>
               </div>
-              <div className="flex items-center gap-3 text-right">
+              <div className="flex items-center gap-4 text-right">
                 <div>
-                  <p className="text-xs opacity-80">Streak</p>
-                  <p className="text-lg font-black">🔥 {streak}</p>
+                  <p className="text-[9px] opacity-70">Streak</p>
+                  <p className="mt-1 flex items-center gap-1 text-lg font-black"><Flame size={17} />{streak}</p>
                 </div>
                 <div>
-                  <p className="text-xs opacity-80">XP</p>
-                  <p className="text-lg font-black">⚡ {xp}</p>
+                  <p className="text-[9px] opacity-70">XP</p>
+                  <p className="mt-1 flex items-center gap-1 text-lg font-black"><Zap size={17} />{xp}</p>
                 </div>
               </div>
             </div>
@@ -1224,20 +1374,21 @@ export default function App() {
                 </div>
               ) : (
                 realLeaderboard.map((user, idx) => {
-                  const medal = idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`;
                   return (
                     <div 
                       key={user.user_email} 
-                      className={`flex justify-between items-center p-3 rounded-2xl border transition-all ${
+                      className={`flex items-center justify-between rounded-2xl border p-4 transition-all ${
                         user.isCurrent 
-                          ? 'bg-amber-50 border-2 border-amber-300 shadow-sm' 
-                          : 'bg-slate-50 border-slate-200'
+                          ? 'border-[#dcd9ff] bg-[#efefff]'
+                          : 'border-[#e8eaf1] bg-[#fafbfc]'
                       }`}
                     >
                       <div className="flex items-center gap-3">
-                        <span className="text-lg font-bold">{medal}</span>
+                        <span className={`grid h-9 w-9 place-items-center rounded-xl text-xs font-black ${idx < 3 ? 'bg-[#fff4e5] text-[#e89a2e]' : 'bg-white text-[#74798c]'}`}>
+                          {idx < 3 ? <Medal size={17} /> : `#${idx + 1}`}
+                        </span>
                         <div>
-                          <p className={`font-extrabold text-xs ${user.isCurrent ? 'text-amber-800' : 'text-slate-700'}`}>
+                          <p className={`text-xs font-extrabold ${user.isCurrent ? 'text-[#5149d8]' : 'text-[#3f4354]'}`}>
                             {user.user_email?.split('@')[0]} {user.isCurrent ? '(You)' : ''}
                           </p>
                           <p className="text-[10px] text-slate-400">
@@ -1245,8 +1396,9 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-                      <div className="font-black text-amber-600 text-xs">
-                        🔥 {user.streak} 天 · ⚡ {user.xp} XP
+                      <div className="flex items-center gap-3 text-[10px] font-black text-[#6e7386]">
+                        <span className="flex items-center gap-1"><Flame size={13} className="text-[#ef8d32]" />{user.streak}</span>
+                        <span className="flex items-center gap-1"><Zap size={13} className="text-[#e8a02d]" />{user.xp} XP</span>
                       </div>
                     </div>
                   );
@@ -1259,27 +1411,38 @@ export default function App() {
 
       {/* 3. 👤 个人中心 */}
       {currentTab === 'profile' && (
-        <main className="max-w-md mx-auto p-4 space-y-6">
-          <section className="bg-white rounded-3xl p-5 border-2 border-slate-200 shadow-sm space-y-5">
-            <div className="text-center space-y-2">
-              <div className="w-20 h-20 bg-green-500 rounded-3xl mx-auto flex items-center justify-center text-4xl shadow-lg border-b-4 border-green-700 pt-1">
-                🦉
+        <main className="mx-auto w-full max-w-[1060px] px-4 py-6 pb-28 sm:px-6 lg:px-8 lg:pb-10">
+          <section className="grid items-start gap-5 lg:grid-cols-[280px_minmax(0,1fr)]">
+            <div className="space-y-3 rounded-[24px] border border-[#e6e8f0] bg-white p-6 text-center shadow-[0_14px_38px_rgba(31,35,55,0.07)]">
+              <div className="mx-auto grid h-20 w-20 place-items-center rounded-[24px] bg-gradient-to-br from-[#7770ff] to-[#5148ef] text-white shadow-[0_12px_28px_rgba(99,91,255,0.28)]">
+                <GraduationCap size={34} strokeWidth={1.8} />
               </div>
-              <h2 className="font-extrabold text-lg text-slate-800">
+              <h2 className="break-all text-sm font-extrabold text-[#2f3242]">
                 {session?.user?.email}
               </h2>
-              <span className="inline-block bg-green-100 text-green-700 text-xs px-3 py-1 rounded-full font-bold">
+              <span className="inline-block rounded-full bg-[#e9f8f2] px-3 py-1 text-[10px] font-bold text-[#16a776]">
                 PRO 学习者
               </span>
+              <div className="grid grid-cols-2 gap-2 pt-3">
+                <div className="rounded-xl bg-[#f8f9fc] p-3"><strong className="block text-lg font-black">{streak}</strong><span className="text-[8px] font-semibold text-[#8b90a3]">Streak</span></div>
+                <div className="rounded-xl bg-[#f8f9fc] p-3"><strong className="block text-lg font-black">{xp}</strong><span className="text-[8px] font-semibold text-[#8b90a3]">XP</span></div>
+              </div>
             </div>
 
-            <div className="space-y-3 pt-2 border-t">
+            <div className="space-y-3 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Settings2 size={18} /></div>
+                <div><h2 className="text-sm font-black">{lang === 'zh' ? '账户与偏好设置' : 'Account & preferences'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '管理提醒、语言与学习体验' : 'Manage reminders, language and learning experience'}</p></div>
+              </div>
               {/* ⏰ 提醒时间与时区设置卡片 */}
-              <div className="p-3.5 bg-slate-50 rounded-2xl border space-y-3">
+              <div className="space-y-3 rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
                 <div className="flex justify-between items-center">
-                  <div>
+                  <div className="flex items-center gap-3">
+                    <Bell size={17} className="text-[#635bff]" />
+                    <div>
                     <p className="text-xs font-bold text-slate-700">{t.reminderTimeTitle}</p>
                     <p className="text-[10px] text-slate-400">{t.reminderTimeDesc}</p>
+                    </div>
                   </div>
                   <input
                     type="time"
@@ -1307,39 +1470,42 @@ export default function App() {
               </div>
 
               {/* 🔑 API Key 设置 */}
-              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
-                <div>
+              <div className="flex items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
+                <div className="flex items-center gap-3">
+                  <KeyRound size={17} className="text-[#635bff]" />
+                  <div>
                   <p className="text-xs font-bold text-slate-700">{t.setApiKey}</p>
                   <p className="text-[10px] text-slate-400">
                     {userApiKey ? `已配置 (***${userApiKey.slice(-4)})` : '未配置 (点击右侧配置)'}
                   </p>
+                  </div>
                 </div>
                 <button
                   onClick={handleConfigureApiKey}
-                  className="text-xs bg-purple-600 hover:bg-purple-700 text-white font-extrabold px-3 py-1.5 rounded-xl shadow-sm transition-all"
+                  className="rounded-xl bg-[#635bff] px-3 py-2 text-[10px] font-extrabold text-white shadow-sm transition-all hover:bg-[#554ce8]"
                 >
                   {userApiKey ? '修改 Key' : '配置 Key'}
                 </button>
               </div>
 
-              <div className="flex justify-between items-center p-3 bg-slate-50 rounded-2xl border">
-                <span className="text-xs font-bold text-slate-700">{t.langSwitch}</span>
+              <div className="flex items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
+                <span className="flex items-center gap-3 text-xs font-bold text-slate-700"><Languages size={17} className="text-[#635bff]" />{t.langSwitch}</span>
                 <button
                   onClick={toggleLanguage}
-                  className="text-xs bg-indigo-500 text-white font-extrabold px-3 py-1.5 rounded-xl shadow-sm"
+                  className="rounded-xl bg-white px-3 py-2 text-[10px] font-extrabold text-[#635bff] shadow-sm ring-1 ring-[#dedcff]"
                 >
                   {lang === 'zh' ? '中文 ➔ EN' : 'EN ➔ 中文'}
                 </button>
               </div>
 
-              <div className="p-3 bg-slate-50 rounded-2xl border space-y-2">
+              <div className="space-y-2 rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
                 <div className="flex justify-between items-center">
                   <span className="text-xs font-bold text-slate-700">{t.customSubTitle}</span>
                   <button
                     onClick={handleAddCustomSubject}
-                    className="text-xs bg-green-500 text-white font-extrabold px-2.5 py-1 rounded-xl"
+                    className="flex items-center gap-1 rounded-xl bg-[#16a776] px-2.5 py-1.5 text-[10px] font-extrabold text-white"
                   >
-                    {t.addSubject}
+                    <Plus size={12} /> {t.addSubject.replace('+ ', '')}
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
@@ -1351,28 +1517,31 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-3 bg-slate-50 rounded-2xl border flex justify-between items-center">
-                <div>
+              <div className="flex items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
+                <div className="flex items-center gap-3">
+                  <Bell size={17} className="text-[#635bff]" />
+                  <div>
                   <p className="text-xs font-bold text-slate-700">{t.nativeNotice}</p>
                   <p className="text-[10px] text-slate-400">
                     {notificationPermission === 'granted' ? t.noticeEnabled : '开启设备提醒权限'}
                   </p>
+                  </div>
                 </div>
                 <button
                   onClick={requestNativeNotification}
                   disabled={notificationPermission === 'granted'}
-                  className={`text-xs font-extrabold px-3 py-1.5 rounded-xl border transition-all ${
+                  className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-extrabold transition-all ${
                     notificationPermission === 'granted'
                       ? 'bg-green-100 text-green-700 border-green-200'
                       : 'bg-indigo-500 text-white border-indigo-600 hover:bg-indigo-600'
                   }`}
                 >
-                  {notificationPermission === 'granted' ? '✅ 已开启' : t.enableNotice}
+                  {notificationPermission === 'granted' ? <><Check size={13} />已开启</> : t.enableNotice}
                 </button>
               </div>
 
-              <div className="p-3 bg-slate-50 rounded-2xl border space-y-2">
-                <span className="text-xs font-bold text-slate-700">{t.feedbackTitle}</span>
+              <div className="space-y-3 rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
+                <span className="flex items-center gap-2 text-xs font-bold text-slate-700"><MessageSquareText size={16} className="text-[#635bff]" />{t.feedbackTitle}</span>
                 <form onSubmit={handleSendFeedback} className="space-y-2">
                   <textarea
                     rows={3}
@@ -1384,7 +1553,7 @@ export default function App() {
                   <button
                     type="submit"
                     disabled={sendingFeedback}
-                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold rounded-xl text-xs transition-all shadow-md disabled:opacity-50"
+                    className="w-full rounded-xl bg-[#635bff] py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:bg-[#554ce8] disabled:opacity-50"
                   >
                     {sendingFeedback ? t.sending : t.submitFeedback}
                   </button>
@@ -1393,17 +1562,17 @@ export default function App() {
 
               <button
                 onClick={handleLogout}
-                className="w-full py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-2xl border border-slate-300 transition-all text-xs"
+                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-[#e1e3eb] bg-[#f8f9fc] py-3 text-xs font-extrabold text-[#5d6174] transition-all hover:bg-[#f0f1f5]"
               >
-                {t.logout}
+                <LogOut size={15} /> {t.logout}
               </button>
 
               <div className="pt-2">
                 <button
                   onClick={handleDeleteAccount}
-                  className="w-full py-3 bg-red-50 hover:bg-red-100 text-red-600 font-extrabold rounded-2xl border border-red-200 transition-all text-xs"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-100 bg-red-50 py-3 text-xs font-extrabold text-red-600 transition-all hover:bg-red-100"
                 >
-                  {t.deleteAccount}
+                  <UserX size={15} /> {t.deleteAccount}
                 </button>
               </div>
             </div>
@@ -1412,44 +1581,45 @@ export default function App() {
       )}
 
       {/* 📌 底部导航栏 */}
-      <nav className="fixed bottom-0 left-0 right-0 z-30 bg-white border-t-2 border-slate-200 px-6 py-2 shadow-2xl max-w-md mx-auto flex justify-around items-center">
+      <nav className="fixed bottom-3 left-1/2 z-30 grid h-[68px] w-[calc(100%_-_28px)] max-w-md -translate-x-1/2 grid-cols-3 rounded-[21px] border border-[#e5e7ef] bg-white/95 p-1.5 shadow-[0_18px_50px_rgba(31,35,55,0.16)] backdrop-blur-xl lg:hidden">
         <button
           onClick={() => setCurrentTab('home')}
-          className={`flex flex-col items-center gap-1 transition-all ${
-            currentTab === 'home' ? 'text-green-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          className={`flex flex-col items-center justify-center gap-1 rounded-[14px] transition-all ${
+            currentTab === 'home' ? 'bg-[#efefff] text-[#635bff] font-extrabold' : 'text-[#9296a8] font-bold'
           }`}
         >
-          <span className="text-2xl">🏠</span>
+          <Home size={18} strokeWidth={2} />
           <span className="text-[10px]">{t.home}</span>
         </button>
 
         <button
           onClick={() => setCurrentTab('leaderboard')}
-          className={`flex flex-col items-center gap-1 transition-all ${
-            currentTab === 'leaderboard' ? 'text-amber-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          className={`flex flex-col items-center justify-center gap-1 rounded-[14px] transition-all ${
+            currentTab === 'leaderboard' ? 'bg-[#efefff] text-[#635bff] font-extrabold' : 'text-[#9296a8] font-bold'
           }`}
         >
-          <span className="text-2xl">🏆</span>
+          <Trophy size={18} strokeWidth={2} />
           <span className="text-[10px]">{t.leaderboard}</span>
         </button>
 
         <button
           onClick={() => setCurrentTab('profile')}
-          className={`flex flex-col items-center gap-1 transition-all ${
-            currentTab === 'profile' ? 'text-indigo-500 scale-110 font-extrabold' : 'text-slate-400 font-bold'
+          className={`flex flex-col items-center justify-center gap-1 rounded-[14px] transition-all ${
+            currentTab === 'profile' ? 'bg-[#efefff] text-[#635bff] font-extrabold' : 'text-[#9296a8] font-bold'
           }`}
         >
-          <span className="text-2xl">👤</span>
+          <UserRound size={18} strokeWidth={2} />
           <span className="text-[10px]">{t.profile}</span>
         </button>
       </nav>
 
       {/* Modal 业务弹窗 */}
       {activeModalItem && (
-        <div className="fixed inset-0 z-40 bg-black/80 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-5 space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-[#171824]/75 p-4 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="relative max-h-[90vh] w-full max-w-2xl space-y-5 overflow-y-auto rounded-[24px] border border-white/70 bg-white p-5 shadow-[0_28px_80px_rgba(16,18,30,0.35)] sm:p-6">
             <div className="flex justify-between items-center">
-              <span className="font-extrabold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-xl text-xs truncate max-w-[200px]">
+              <span className="flex max-w-[calc(100%_-_48px)] items-center gap-2 truncate rounded-xl bg-[#efefff] px-3 py-2 text-xs font-extrabold text-[#635bff]">
+                <Target size={14} className="shrink-0" />
                 {activeModalItem.item.title || activeModalItem.item.subject} · {activeModalItem.stageNumber === 1 ? t.initialReview : t.dayStageText(activeModalItem.stageNumber)}
               </span>
               <button
@@ -1458,9 +1628,9 @@ export default function App() {
                   setReviewNewImages([]);
                   setAiFeedback('');
                 }}
-                className="text-slate-400 hover:text-slate-600 text-sm font-bold bg-slate-100 w-8 h-8 rounded-full flex items-center justify-center"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#f4f5f8] text-[#858a9d] transition hover:bg-[#eceef3] hover:text-[#4c5062]"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
 
@@ -1468,7 +1638,7 @@ export default function App() {
             {activeModalItem.type === 'review' && (
               <div className="space-y-4">
                 <div className="space-y-1.5">
-                  <span className="text-xs font-bold text-slate-500">📌 原始笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
+                  <span className="flex items-center gap-2 text-xs font-bold text-slate-500"><ImageIcon size={14} />原始笔记（共 {getItemImages(activeModalItem.item).length} 张）</span>
                   <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-1 bg-slate-100 rounded-2xl border">
                     {getItemImages(activeModalItem.item).map((img, idx) => (
                       <div 
@@ -1490,8 +1660,9 @@ export default function App() {
                 </div>
 
                 <div className="space-y-2 border-t pt-3">
-                  <label className="block border-2 border-dashed border-green-300 hover:border-green-500 bg-green-50/50 rounded-2xl p-2.5 text-center cursor-pointer transition-all">
-                    <span className="text-xs font-bold text-green-700">
+                  <label className="block cursor-pointer rounded-2xl border border-dashed border-[#b8b4ff] bg-[#f7f6ff] p-3 text-center transition-all hover:border-[#7f78ff]">
+                    <span className="flex items-center justify-center gap-2 text-xs font-bold text-[#635bff]">
+                      <UploadCloud size={15} />
                       {t.reviewNotice}
                     </span>
                     <input 
@@ -1539,8 +1710,9 @@ export default function App() {
                       <button
                         onClick={handleGeminiCorrection}
                         disabled={isAiAnalyzing}
-                        className="w-full py-2.5 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 hover:opacity-90 text-white text-xs font-extrabold rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 disabled:opacity-60"
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#635bff] to-[#8b61ed] py-2.5 text-xs font-extrabold text-white shadow-md transition-all hover:opacity-90 disabled:opacity-60"
                       >
+                        <Sparkles size={15} />
                         {isAiAnalyzing ? t.aiAnalyzing : t.aiCorrectionBtn}
                       </button>
                     </div>
@@ -1564,9 +1736,9 @@ export default function App() {
                     activeModalItem.item,
                     activeModalItem.stageNumber
                   )}
-                  className="w-full py-3.5 bg-green-500 hover:bg-green-600 text-white font-extrabold rounded-2xl border-b-4 border-green-700 active:border-b-0 active:translate-y-1 transition-all shadow-lg"
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#16a776] py-3.5 font-extrabold text-white shadow-[0_10px_22px_rgba(22,167,118,0.24)] transition-all hover:bg-[#128d64]"
                 >
-                  {t.completeBtn}
+                  <Check size={17} /> {t.completeBtn}
                 </button>
               </div>
             )}
@@ -1605,7 +1777,7 @@ export default function App() {
                     return (
                       <div key={idx} className="bg-indigo-50/60 rounded-2xl p-3 border border-indigo-100 space-y-2">
                         <div className="flex justify-between text-xs text-indigo-600 font-bold">
-                          <span>✏️ 第 {rev.stage} 次复习重写笔记（共 {revImgs.length} 张）</span>
+                          <span className="flex items-center gap-1.5"><Pencil size={13} />第 {rev.stage} 次复习重写笔记（共 {revImgs.length} 张）</span>
                           <span>{rev.date}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
@@ -1629,7 +1801,7 @@ export default function App() {
 
                         {rev.aiFeedback && (
                           <div className="bg-white/90 p-2.5 rounded-xl border border-indigo-100 text-[11px] text-slate-700 whitespace-pre-wrap">
-                            <strong className="text-indigo-600 block mb-1">🤖 Gemini 批改记录：</strong>
+                            <strong className="mb-1 flex items-center gap-1.5 text-indigo-600"><Sparkles size={13} />Gemini 批改记录：</strong>
                             {rev.aiFeedback}
                           </div>
                         )}
@@ -1658,9 +1830,9 @@ export default function App() {
         >
           <button
             onClick={() => setFullScreenImage(null)}
-            className="absolute top-4 right-4 z-50 bg-white/20 hover:bg-white/40 text-white text-lg font-extrabold w-10 h-10 rounded-full flex items-center justify-center backdrop-blur-lg border border-white/30 transition-all"
+            className="absolute right-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-xl border border-white/30 bg-white/20 text-white backdrop-blur-lg transition-all hover:bg-white/40"
           >
-            ✕
+            <X size={19} />
           </button>
 
           <div className="absolute top-5 text-white/70 text-xs font-bold pointer-events-none">
