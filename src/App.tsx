@@ -71,6 +71,8 @@ interface RevisionLog {
   imageUrls?: string[];
   date: string;
   aiFeedback?: string;
+  completed?: boolean;
+  completedAt?: string;
 }
 
 interface KnowledgeItem {
@@ -94,6 +96,18 @@ interface LeaderboardUser {
 
 const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+
+function getCloudCompletedTaskIds(items: KnowledgeItem[], date: string) {
+  return items.flatMap(item => {
+    if (!Array.isArray(item.revisions)) return [];
+
+    return item.revisions.flatMap(revision => {
+      const stageNumber = Number(revision.stage);
+      if (revision.date !== date || !Number.isFinite(stageNumber)) return [];
+      return [`${item.id}_stage${stageNumber}`];
+    });
+  });
+}
 
 const TRANSLATIONS = {
   zh: {
@@ -128,6 +142,7 @@ const TRANSLATIONS = {
     enterNewTitle: '输入新的卡片/文件夹名称：',
     reviewNotice: '上传本次复习重写笔记或答题照片（可多选）',
     completeBtn: '掌握知识点，打卡过关',
+    syncing: '正在同步...',
     close: '关闭',
     totalPhotos: '张笔记',
     clickToEnlarge: '🔍 点击查看原图',
@@ -181,6 +196,7 @@ const TRANSLATIONS = {
     enterNewTitle: 'Enter new deck/card title:',
     reviewNotice: 'Upload Review Photos (Multi-select)',
     completeBtn: 'Mastered & Complete Level',
+    syncing: 'Syncing...',
     close: 'Close',
     totalPhotos: 'Notes',
     clickToEnlarge: '🔍 Tap to view fullscreen',
@@ -220,6 +236,7 @@ export default function App() {
   const [xp, setXp] = useState<number>(20);
   const [items, setItems] = useState<KnowledgeItem[]>([]);
   const [completedToday, setCompletedToday] = useState<string[]>([]);
+  const [completingTaskId, setCompletingTaskId] = useState<string | null>(null);
   
   const [realLeaderboard, setRealLeaderboard] = useState<LeaderboardUser[]>([]);
 
@@ -280,10 +297,26 @@ export default function App() {
     if (session) {
       fetchData();
       fetchCustomSubjects();
-      fetchLeaderboard();
       fetchUserProfile();
     }
   }, [session]);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+
+    const refreshSyncedData = () => {
+      if (document.visibilityState === 'visible') {
+        fetchData();
+      }
+    };
+
+    window.addEventListener('focus', refreshSyncedData);
+    document.addEventListener('visibilitychange', refreshSyncedData);
+    return () => {
+      window.removeEventListener('focus', refreshSyncedData);
+      document.removeEventListener('visibilitychange', refreshSyncedData);
+    };
+  }, [session?.user?.id]);
 
   const toggleLanguage = () => {
     const nextLang = lang === 'zh' ? 'en' : 'zh';
@@ -440,6 +473,58 @@ export default function App() {
     return rev.imageUrl ? [rev.imageUrl] : [];
   };
 
+  async function persistLocalCompletions(
+    loadedItems: KnowledgeItem[],
+    localCompleted: string[],
+    completionDate: string
+  ) {
+    if (!session?.user?.id || localCompleted.length === 0) return loadedItems;
+
+    return Promise.all(loadedItems.map(async item => {
+      const taskPrefix = `${item.id}_stage`;
+      const completedStages = localCompleted
+        .filter(taskId => taskId.startsWith(taskPrefix))
+        .map(taskId => Number(taskId.slice(taskPrefix.length)))
+        .filter(Number.isFinite);
+
+      if (completedStages.length === 0) return item;
+
+      const updatedRevisions = Array.isArray(item.revisions) ? [...item.revisions] : [];
+      let shouldSync = false;
+      completedStages.forEach(stageNumber => {
+        const existsInCloud = updatedRevisions.some(
+          revision => Number(revision.stage) === stageNumber && revision.date === completionDate
+        );
+        if (!existsInCloud) {
+          shouldSync = true;
+          updatedRevisions.push({
+            stage: stageNumber,
+            date: completionDate,
+            completed: true,
+            completedAt: new Date().toISOString(),
+          });
+        }
+      });
+
+      if (!shouldSync) return item;
+
+      const { data: syncedItem, error } = await supabase
+        .from('knowledge_base')
+        .update({ revisions: updatedRevisions })
+        .eq('id', item.id)
+        .eq('user_id', session.user.id)
+        .select('id')
+        .maybeSingle();
+
+      if (error || !syncedItem) {
+        console.warn(`未能迁移任务 ${item.id} 的本地完成记录`, error);
+        return item;
+      }
+
+      return { ...item, revisions: updatedRevisions };
+    }));
+  }
+
   async function fetchData() {
     if (!session?.user?.id) return;
 
@@ -450,21 +535,47 @@ export default function App() {
       .eq('user_id', session.user.id)
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setItems(data);
-    }
-
     const savedStreak = localStorage.getItem(`checkin_streak_${session.user.id}`);
     const savedXp = localStorage.getItem(`checkin_xp_${session.user.id}`);
     const savedCompleted = localStorage.getItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
 
-    if (savedStreak) setStreak(Number(savedStreak));
-    if (savedXp) setXp(Number(savedXp));
-    if (savedCompleted) setCompletedToday(JSON.parse(savedCompleted));
+    const nextStreak = savedStreak ? Number(savedStreak) : 1;
+    const nextXp = savedXp ? Number(savedXp) : 20;
+    let localCompleted: string[] = [];
+    if (savedCompleted) {
+      try {
+        const parsed = JSON.parse(savedCompleted);
+        if (Array.isArray(parsed)) {
+          localCompleted = parsed.filter((taskId): taskId is string => typeof taskId === 'string');
+        }
+      } catch {
+        localStorage.removeItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
+      }
+    }
+
+    let loadedItemCount = items.length;
+    if (!error && data) {
+      const syncedItems = await persistLocalCompletions(data, localCompleted, getTodayStr());
+      const cloudCompleted = getCloudCompletedTaskIds(syncedItems, getTodayStr());
+      const syncedCompleted = Array.from(new Set([...localCompleted, ...cloudCompleted]));
+      loadedItemCount = syncedItems.length;
+      setItems(syncedItems);
+      setCompletedToday(syncedCompleted);
+      localStorage.setItem(
+        `checkin_completed_${session.user.id}_${getTodayStr()}`,
+        JSON.stringify(syncedCompleted)
+      );
+    } else {
+      setCompletedToday(localCompleted);
+    }
+
+    setStreak(nextStreak);
+    setXp(nextXp);
+    await fetchLeaderboard({ streak: nextStreak, xp: nextXp, itemCount: loadedItemCount });
     setLoading(false);
   }
 
-  async function fetchLeaderboard() {
+  async function fetchLeaderboard(currentStats?: { streak: number; xp: number; itemCount?: number }) {
     const { data, error } = await supabase
       .from('knowledge_base')
       .select('user_id, user_email');
@@ -482,14 +593,17 @@ export default function App() {
       });
 
       if (session?.user?.email && !userMap[session.user.email]) {
-        userMap[session.user.email] = { count: items.length, userId: session.user.id };
+        userMap[session.user.email] = {
+          count: currentStats?.itemCount ?? items.length,
+          userId: session.user.id,
+        };
       }
 
       const boardList: LeaderboardUser[] = Object.keys(userMap).map(email => {
         const isCurrent = email === session?.user?.email;
         const count = userMap[email].count;
-        const userStreak = isCurrent ? streak : Math.max(1, count);
-        const userXp = isCurrent ? xp : count * 20;
+        const userStreak = isCurrent ? (currentStats?.streak ?? streak) : Math.max(1, count);
+        const userXp = isCurrent ? (currentStats?.xp ?? xp) : count * 20;
 
         return {
           user_email: email,
@@ -838,54 +952,90 @@ export default function App() {
     }
   };
 
-  const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber?: number) => {
-    if (completedToday.includes(taskId)) return;
+  const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber: number) => {
+    if (!session?.user?.id || completedToday.includes(taskId) || completingTaskId === taskId) return;
 
-    let updatedRevisions = item.revisions ? [...item.revisions] : [];
-    if (reviewNewImages.length > 0 && stageNumber) {
-      updatedRevisions.push({
+    setCompletingTaskId(taskId);
+    try {
+      const completionDate = getTodayStr();
+      const updatedRevisions = Array.isArray(item.revisions) ? [...item.revisions] : [];
+      const existingRevisionIndex = updatedRevisions.findIndex(
+        revision => Number(revision.stage) === stageNumber && revision.date === completionDate
+      );
+      const existingRevision = existingRevisionIndex >= 0
+        ? updatedRevisions[existingRevisionIndex]
+        : undefined;
+      const completionRevision: RevisionLog = {
+        ...existingRevision,
         stage: stageNumber,
-        imageUrl: reviewNewImages[0],
-        imageUrls: reviewNewImages,
-        date: getTodayStr(),
-        aiFeedback: aiFeedback || undefined,
-      });
-    }
+        date: completionDate,
+        completed: true,
+        completedAt: new Date().toISOString(),
+        ...(reviewNewImages.length > 0
+          ? { imageUrl: reviewNewImages[0], imageUrls: reviewNewImages }
+          : {}),
+        ...(aiFeedback ? { aiFeedback } : {}),
+      };
 
-    const updatedItems = items.map(i => {
-      if (i.id === item.id) {
-        return { ...i, revisions: updatedRevisions };
+      if (existingRevisionIndex >= 0) {
+        updatedRevisions[existingRevisionIndex] = completionRevision;
+      } else {
+        updatedRevisions.push(completionRevision);
       }
-      return i;
-    });
-    setItems(updatedItems);
 
-    await supabase
-      .from('knowledge_base')
-      .update({ revisions: updatedRevisions })
-      .eq('id', item.id);
+      const { data: syncedItem, error } = await supabase
+        .from('knowledge_base')
+        .update({ revisions: updatedRevisions })
+        .eq('id', item.id)
+        .eq('user_id', session.user.id)
+        .select('id')
+        .maybeSingle();
 
-    const newCompleted = [...completedToday, taskId];
-    setCompletedToday(newCompleted);
-    localStorage.setItem(`checkin_completed_${session?.user?.id}_${getTodayStr()}`, JSON.stringify(newCompleted));
+      if (error) throw error;
+      if (!syncedItem) {
+        throw new Error(lang === 'zh' ? '云端未找到对应的复习任务' : 'The review task was not found in the cloud');
+      }
 
-    const newXp = xp + 20;
-    setXp(newXp);
-    localStorage.setItem(`checkin_xp_${session?.user?.id}`, newXp.toString());
+      setItems(currentItems => currentItems.map(currentItem =>
+        currentItem.id === item.id
+          ? { ...currentItem, revisions: updatedRevisions }
+          : currentItem
+      ));
 
-    if (newCompleted.length === todayTasks.length) {
-      const newStreak = streak + 1;
-      setStreak(newStreak);
-      localStorage.setItem(`checkin_streak_${session?.user?.id}`, newStreak.toString());
-      confetti({ particleCount: 120, spread: 100, origin: { y: 0.6 } });
-    } else {
-      confetti({ particleCount: 40, spread: 50 });
+      const newCompleted = Array.from(new Set([...completedToday, taskId]));
+      setCompletedToday(newCompleted);
+      localStorage.setItem(
+        `checkin_completed_${session.user.id}_${completionDate}`,
+        JSON.stringify(newCompleted)
+      );
+
+      const newXp = xp + 20;
+      let newStreak = streak;
+      setXp(newXp);
+      localStorage.setItem(`checkin_xp_${session.user.id}`, newXp.toString());
+
+      if (newCompleted.length === todayTasks.length) {
+        newStreak = streak + 1;
+        setStreak(newStreak);
+        localStorage.setItem(`checkin_streak_${session.user.id}`, newStreak.toString());
+        confetti({ particleCount: 120, spread: 100, origin: { y: 0.6 } });
+      } else {
+        confetti({ particleCount: 40, spread: 50 });
+      }
+
+      setReviewNewImages([]);
+      setAiFeedback('');
+      setActiveModalItem(null);
+      await fetchLeaderboard({ streak: newStreak, xp: newXp, itemCount: items.length });
+    } catch (error: any) {
+      console.error('同步任务完成状态失败:', error);
+      alert(lang === 'zh'
+        ? `完成状态同步失败，请检查网络后重试：${error?.message || '未知错误'}`
+        : `Could not sync completion. Check your connection and retry: ${error?.message || 'Unknown error'}`
+      );
+    } finally {
+      setCompletingTaskId(null);
     }
-
-    setReviewNewImages([]);
-    setAiFeedback('');
-    setActiveModalItem(null);
-    fetchLeaderboard();
   };
 
   const handleDeleteItem = async (id: string) => {
@@ -1348,19 +1498,19 @@ export default function App() {
               <div><h2 className="text-lg font-black">{t.rankTitle}</h2><p className="mt-0.5 text-[10px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '和所有学习者一起保持进步' : 'Keep progressing with every learner'}</p></div>
             </div>
 
-            <div className="flex items-center justify-between rounded-[20px] bg-gradient-to-br from-[#6860ff] to-[#4b43d3] p-5 text-white shadow-[0_14px_28px_rgba(78,68,211,0.24)]">
-              <div>
+            <div className="flex flex-col gap-4 rounded-[20px] bg-gradient-to-br from-[#6860ff] to-[#4b43d3] p-5 text-white shadow-[0_14px_28px_rgba(78,68,211,0.24)] sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <p className="text-[10px] font-bold opacity-70">{t.myStats}</p>
-                <p className="mt-1 max-w-[220px] truncate text-sm font-extrabold">
+                <p className="mt-1 break-all text-sm font-extrabold sm:max-w-[220px] sm:truncate">
                   {session?.user?.email}
                 </p>
               </div>
-              <div className="flex items-center gap-4 text-right">
-                <div>
+              <div className="grid w-full grid-cols-2 gap-3 text-left sm:flex sm:w-auto sm:items-center sm:gap-4 sm:text-right">
+                <div className="rounded-xl bg-white/10 px-3 py-2 sm:bg-transparent sm:p-0">
                   <p className="text-[9px] opacity-70">Streak</p>
                   <p className="mt-1 flex items-center gap-1 text-lg font-black"><Flame size={17} />{streak}</p>
                 </div>
-                <div>
+                <div className="rounded-xl bg-white/10 px-3 py-2 sm:bg-transparent sm:p-0">
                   <p className="text-[9px] opacity-70">XP</p>
                   <p className="mt-1 flex items-center gap-1 text-lg font-black"><Zap size={17} />{xp}</p>
                 </div>
@@ -1383,12 +1533,12 @@ export default function App() {
                           : 'border-[#e8eaf1] bg-[#fafbfc]'
                       }`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex min-w-0 flex-1 items-center gap-3">
                         <span className={`grid h-9 w-9 place-items-center rounded-xl text-xs font-black ${idx < 3 ? 'bg-[#fff4e5] text-[#e89a2e]' : 'bg-white text-[#74798c]'}`}>
                           {idx < 3 ? <Medal size={17} /> : `#${idx + 1}`}
                         </span>
-                        <div>
-                          <p className={`text-xs font-extrabold ${user.isCurrent ? 'text-[#5149d8]' : 'text-[#3f4354]'}`}>
+                        <div className="min-w-0">
+                          <p className={`truncate text-xs font-extrabold ${user.isCurrent ? 'text-[#5149d8]' : 'text-[#3f4354]'}`}>
                             {user.user_email?.split('@')[0]} {user.isCurrent ? '(You)' : ''}
                           </p>
                           <p className="text-[10px] text-slate-400">
@@ -1396,7 +1546,7 @@ export default function App() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 text-[10px] font-black text-[#6e7386]">
+                      <div className="ml-2 flex shrink-0 items-center gap-2 text-[10px] font-black text-[#6e7386] sm:gap-3">
                         <span className="flex items-center gap-1"><Flame size={13} className="text-[#ef8d32]" />{user.streak}</span>
                         <span className="flex items-center gap-1"><Zap size={13} className="text-[#e8a02d]" />{user.xp} XP</span>
                       </div>
@@ -1736,9 +1886,13 @@ export default function App() {
                     activeModalItem.item,
                     activeModalItem.stageNumber
                   )}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#16a776] py-3.5 font-extrabold text-white shadow-[0_10px_22px_rgba(22,167,118,0.24)] transition-all hover:bg-[#128d64]"
+                  disabled={completingTaskId === `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`}
+                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#16a776] py-3.5 font-extrabold text-white shadow-[0_10px_22px_rgba(22,167,118,0.24)] transition-all hover:bg-[#128d64] disabled:cursor-wait disabled:opacity-60"
                 >
-                  <Check size={17} /> {t.completeBtn}
+                  <Check size={17} />
+                  {completingTaskId === `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`
+                    ? t.syncing
+                    : t.completeBtn}
                 </button>
               </div>
             )}

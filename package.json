@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@emailjs/browser": "^4.4.1",
-    "@emailjs/nodejs": "^5.0.2",
     "@google/generative-ai": "^0.24.1",
     "@supabase/supabase-js": "^2.112.2",
     "canvas-confetti": "^1.9.4",

@@ -1,22 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
-import emailjs from '@emailjs/nodejs';
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const EMAILJS_SERVICE_ID = process.env.EMAILJS_SERVICE_ID;
-const EMAILJS_TEMPLATE_ID = process.env.EMAILJS_TEMPLATE_ID;
-const EMAILJS_PUBLIC_KEY = process.env.EMAILJS_PUBLIC_KEY;
-const EMAILJS_PRIVATE_KEY = process.env.EMAILJS_PRIVATE_KEY;
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const SENDER_EMAIL = process.env.SENDER_EMAIL?.trim() || 'onboarding@resend.dev';
 const FORCE_SEND = process.env.FORCE_SEND === 'true';
 const TARGET_EMAIL = process.env.TARGET_EMAIL?.trim().toLowerCase() || '';
 
 const requiredConfig = {
   SUPABASE_URL,
   SUPABASE_SERVICE_ROLE_KEY,
-  EMAILJS_SERVICE_ID,
-  EMAILJS_TEMPLATE_ID,
-  EMAILJS_PUBLIC_KEY,
-  EMAILJS_PRIVATE_KEY,
+  RESEND_API_KEY,
 };
 const missingConfig = Object.entries(requiredConfig)
   .filter(([, value]) => !value)
@@ -41,6 +35,15 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 });
 
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
 
 function getCurrentHourInTimezone(timezone = 'Asia/Shanghai') {
   try {
@@ -174,26 +177,43 @@ async function run() {
   for (const email of targetEmails) {
     const { tasks, todayStr, timezone } = userTasksMap[email];
     const taskListStr = tasks.map((t, idx) => `${idx + 1}. ${t}`).join('\n');
+    const taskListHtml = tasks
+      .map(task => `<li style="margin: 8px 0;">${escapeHtml(task)}</li>`)
+      .join('');
 
     console.log(`✉️ 正在向 ${email} (${timezone}) 发送 ${tasks.length} 项复习提醒...`);
 
     try {
-      await emailjs.send(
-        EMAILJS_SERVICE_ID,
-        EMAILJS_TEMPLATE_ID,
-        {
-          to_email: email,
-          user_email: email,
-          task_count: tasks.length,
-          task_list: taskListStr,
-          date: todayStr,
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
         },
-        {
-          publicKey: EMAILJS_PUBLIC_KEY,
-          privateKey: EMAILJS_PRIVATE_KEY,
-        }
-      );
-      console.log(`✅ 成功发送至 ${email}`);
+        body: JSON.stringify({
+          from: `复习打卡提醒 <${SENDER_EMAIL}>`,
+          to: [email],
+          subject: `今日打卡提醒：你有 ${tasks.length} 个复习任务待完成`,
+          text: `今天（${todayStr}）需要复习：\n\n${taskListStr}`,
+          html: `
+            <div style="font-family: sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 16px;">
+              <h2 style="color: #16a34a;">艾宾浩斯复习打卡提醒</h2>
+              <p>今天（${escapeHtml(todayStr)}）你有 <strong>${tasks.length}</strong> 个知识点需要复习：</p>
+              <ol style="background: #f8fafc; padding: 16px 36px; border-radius: 12px; color: #334155;">
+                ${taskListHtml}
+              </ol>
+              <p style="color: #64748b; font-size: 13px;">保持学习节奏，今天也要加油！</p>
+            </div>
+          `,
+        }),
+      });
+      const responseBody = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(`Resend 返回 ${response.status}: ${JSON.stringify(responseBody)}`);
+      }
+
+      console.log(`✅ 成功发送至 ${email}，Resend ID: ${responseBody?.id}`);
     } catch (err) {
       failedCount += 1;
       console.error(`❌ 发送至 ${email} 失败:`, err);
@@ -201,7 +221,7 @@ async function run() {
   }
 
   if (failedCount > 0) {
-    throw new Error(`${failedCount} 封提醒邮件发送失败，请查看上方 EmailJS 错误。`);
+    throw new Error(`${failedCount} 封提醒邮件发送失败，请查看上方 Resend 错误。`);
   }
 
   console.log('🎉 定时任务调度完成！');
