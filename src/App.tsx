@@ -96,6 +96,14 @@ interface LeaderboardUser {
   isCurrent: boolean;
 }
 
+export function getNetworkErrorMessage(error: unknown, fallback: string) {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/load failed|failed to fetch|networkerror|network request failed/i.test(message)) {
+    return '网络请求失败，请检查网络连接或确认 Vercel 域名已加入 Supabase 的允许列表。';
+  }
+  return message || fallback;
+}
+
 const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
 
@@ -300,11 +308,17 @@ export default function App() {
   } | null>(null);
 
   const [loading, setLoading] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string>('');
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setAuthChecking(false);
+      setSyncError('');
+    }).catch(error => {
+      console.error('获取登录状态失败:', error);
+      setAuthChecking(false);
+      setSyncError(getNetworkErrorMessage(error, '无法连接到登录服务，请稍后重试。'));
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -551,50 +565,58 @@ export default function App() {
     if (!session?.user?.id) return;
 
     setLoading(true);
-    const { data, error } = await supabase
-      .from('knowledge_base')
-      .select('*')
-      .eq('user_id', session.user.id)
-      .order('created_at', { ascending: false });
+    try {
+      const { data, error } = await supabase
+        .from('knowledge_base')
+        .select('*')
+        .eq('user_id', session.user.id)
+        .order('created_at', { ascending: false });
 
-    const savedStreak = localStorage.getItem(`checkin_streak_${session.user.id}`);
-    const savedXp = localStorage.getItem(`checkin_xp_${session.user.id}`);
-    const savedCompleted = localStorage.getItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
+      const savedStreak = localStorage.getItem(`checkin_streak_${session.user.id}`);
+      const savedXp = localStorage.getItem(`checkin_xp_${session.user.id}`);
+      const savedCompleted = localStorage.getItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
+      const nextStreak = savedStreak ? Number(savedStreak) : 1;
+      const nextXp = savedXp ? Number(savedXp) : 20;
+      let localCompleted: string[] = [];
 
-    const nextStreak = savedStreak ? Number(savedStreak) : 1;
-    const nextXp = savedXp ? Number(savedXp) : 20;
-    let localCompleted: string[] = [];
-    if (savedCompleted) {
-      try {
-        const parsed = JSON.parse(savedCompleted);
-        if (Array.isArray(parsed)) {
-          localCompleted = parsed.filter((taskId): taskId is string => typeof taskId === 'string');
+      if (savedCompleted) {
+        try {
+          const parsed = JSON.parse(savedCompleted);
+          if (Array.isArray(parsed)) {
+            localCompleted = parsed.filter((taskId): taskId is string => typeof taskId === 'string');
+          }
+        } catch {
+          localStorage.removeItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
         }
-      } catch {
-        localStorage.removeItem(`checkin_completed_${session.user.id}_${getTodayStr()}`);
       }
-    }
 
-    let loadedItemCount = items.length;
-    if (!error && data) {
-      const syncedItems = await persistLocalCompletions(data, localCompleted, getTodayStr());
-      const cloudCompleted = getCloudCompletedTaskIds(syncedItems, getTodayStr());
-      const syncedCompleted = Array.from(new Set([...localCompleted, ...cloudCompleted]));
-      loadedItemCount = syncedItems.length;
-      setItems(syncedItems);
-      setCompletedToday(syncedCompleted);
-      localStorage.setItem(
-        `checkin_completed_${session.user.id}_${getTodayStr()}`,
-        JSON.stringify(syncedCompleted)
-      );
-    } else {
-      setCompletedToday(localCompleted);
-    }
+      if (error) throw error;
+      let loadedItemCount = items.length;
+      if (data) {
+        const syncedItems = await persistLocalCompletions(data, localCompleted, getTodayStr());
+        const cloudCompleted = getCloudCompletedTaskIds(syncedItems, getTodayStr());
+        const syncedCompleted = Array.from(new Set([...localCompleted, ...cloudCompleted]));
+        loadedItemCount = syncedItems.length;
+        setItems(syncedItems);
+        setCompletedToday(syncedCompleted);
+        localStorage.setItem(
+          `checkin_completed_${session.user.id}_${getTodayStr()}`,
+          JSON.stringify(syncedCompleted)
+        );
+      } else {
+        setCompletedToday(localCompleted);
+      }
 
-    setStreak(nextStreak);
-    setXp(nextXp);
-    await fetchLeaderboard({ streak: nextStreak, xp: nextXp, itemCount: loadedItemCount });
-    setLoading(false);
+      setStreak(nextStreak);
+      setXp(nextXp);
+      await fetchLeaderboard({ streak: nextStreak, xp: nextXp, itemCount: loadedItemCount });
+      setSyncError('');
+    } catch (error) {
+      console.error('同步云端数据失败:', error);
+      setSyncError(getNetworkErrorMessage(error, '云端数据同步失败，请稍后重试。'));
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function fetchLeaderboard(currentStats?: { streak: number; xp: number; itemCount?: number }) {
@@ -1146,11 +1168,17 @@ export default function App() {
   }
 
   if (!session) {
-    return <Login onSuccess={() => {}} lang={lang} onToggleLang={toggleLanguage} />;
+    return <Login onSuccess={() => {}} lang={lang} onToggleLang={toggleLanguage} initialError={syncError} />;
   }
 
   return (
     <div className="min-h-screen bg-[#f5f6fa] text-[#1b1d2a] font-sans lg:pl-60">
+      {syncError && (
+        <div className="mx-auto mt-3 flex w-[calc(100%_-_32px)] max-w-[1060px] items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+          <span>{syncError}</span>
+          <button type="button" onClick={() => fetchData()} className="shrink-0 rounded-xl bg-amber-100 px-3 py-1.5 font-extrabold text-amber-900 hover:bg-amber-200">重试</button>
+        </div>
+      )}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-60 flex-col border-r border-[#e8eaf1] bg-white/95 px-4 py-6 backdrop-blur-xl lg:flex">
         <div className="flex items-center gap-3 px-2 pb-8">
           <div className="grid h-10 w-10 place-items-center rounded-[14px] bg-gradient-to-br from-[#7770ff] to-[#5148ef] text-white shadow-[0_10px_24px_rgba(99,91,255,0.28)]">

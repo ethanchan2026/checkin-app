@@ -1,20 +1,21 @@
 import React, { useState } from 'react';
 import { ArrowRight, Check, Eye, EyeOff, Languages, LockKeyhole, Mail } from 'lucide-react';
-import { supabase } from './App';
+import { getNetworkErrorMessage, supabase } from './App';
 
 interface LoginProps {
   onSuccess: () => void;
   lang: 'zh' | 'en';
   onToggleLang: () => void;
+  initialError?: string;
 }
 
-export const Login: React.FC<LoginProps> = ({ onSuccess, lang, onToggleLang }) => {
+export const Login: React.FC<LoginProps> = ({ onSuccess, lang, onToggleLang, initialError = '' }) => {
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [errorMsg, setErrorMsg] = useState(initialError);
   const [infoMsg, setInfoMsg] = useState('');
 
   const isZh = lang === 'zh';
@@ -77,7 +78,10 @@ export const Login: React.FC<LoginProps> = ({ onSuccess, lang, onToggleLang }) =
       }
     } catch (err: any) {
       console.error(err);
-      setErrorMsg(err.message || (isZh ? '网络连接失败，请重试！' : 'Network error, please try again!'));
+      setErrorMsg(getNetworkErrorMessage(
+        err,
+        isZh ? '网络连接失败，请检查网络后重试！' : 'Network error, please try again!'
+      ));
     } finally {
       setLoading(false);
     }
