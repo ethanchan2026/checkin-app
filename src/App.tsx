@@ -97,11 +97,26 @@ interface LeaderboardUser {
 }
 
 export function getNetworkErrorMessage(error: unknown, fallback: string) {
-  const message = error instanceof Error ? error.message : String(error || '');
+  const errorRecord = error && typeof error === 'object'
+    ? error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown }
+    : null;
+  const message = error instanceof Error
+    ? error.message
+    : typeof errorRecord?.message === 'string'
+      ? errorRecord.message
+      : typeof error === 'string'
+        ? error
+        : '';
   if (/load failed|failed to fetch|networkerror|network request failed/i.test(message)) {
     return '网络请求失败，请检查网络连接或确认 Vercel 域名已加入 Supabase 的允许列表。';
   }
-  return message || fallback;
+  if (message) {
+    const extra = [errorRecord?.code, errorRecord?.details, errorRecord?.hint]
+      .filter(value => typeof value === 'string' && value.trim())
+      .join('；');
+    return extra ? `${message}（${extra}）` : message;
+  }
+  return fallback;
 }
 
 const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
