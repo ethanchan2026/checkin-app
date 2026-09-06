@@ -1024,13 +1024,22 @@ export default function App() {
       user_email: session.user.email
     };
 
-    const { data, error } = await supabase
-      .from('knowledge_base')
-      .insert([newItemData])
-      .select();
+    let data;
+    let error;
+    try {
+      ({ data, error } = await supabase
+        .from('knowledge_base')
+        .insert([newItemData])
+        .select('id')
+        .maybeSingle());
+    } catch (requestError) {
+      console.error('保存新资料失败:', requestError);
+      alert(`保存失败：${getNetworkErrorMessage(requestError, '无法保存资料，请稍后重试。')}`);
+      return;
+    }
 
-    if (!error && data) {
-      const createdItem = data[0] as KnowledgeItem;
+    if (!error && data?.id) {
+      const createdItem = { ...newItemData, id: data.id } as KnowledgeItem;
       setItems([createdItem, ...items]);
       setPreviewImages([]);
       setNewTitle('');
@@ -1046,7 +1055,7 @@ export default function App() {
         alert(`${t.newLevelReminderFailed}: ${errorMessage}`);
       }
     } else {
-      alert(`Error: ${error?.message}`);
+      alert(`保存失败：${getNetworkErrorMessage(error, '无法保存资料，请稍后重试。')}`);
     }
   };
 
