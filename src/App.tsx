@@ -2,12 +2,14 @@ import React, { useState, useEffect } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
+import Cropper, { type Area } from 'react-easy-crop';
 import {
   ArrowRight,
   Bell,
   BookOpenCheck,
   CalendarDays,
   Check,
+  Crop,
   Flame,
   FolderOpen,
   GraduationCap,
@@ -109,6 +111,13 @@ function getCloudCompletedTaskIds(items: KnowledgeItem[], date: string) {
   });
 }
 
+type CropTarget = 'new' | 'review';
+interface CropSession {
+  images: string[];
+  currentIndex: number;
+  target: CropTarget;
+}
+
 const TRANSLATIONS = {
   zh: {
     home: '主页',
@@ -163,6 +172,10 @@ const TRANSLATIONS = {
     timezoneTitle: '所在时区',
     newLevelReminderSent: '✅ 关卡已创建，提醒邮件已发送！',
     newLevelReminderFailed: '关卡已创建，但提醒邮件发送失败',
+    cropTitle: '裁剪图片',
+    cropHint: '拖动图片调整裁剪区域，滚动条可缩放',
+    cropConfirm: '确认裁剪',
+    cropCancel: '取消上传',
   },
   en: {
     home: 'Home',
@@ -217,6 +230,10 @@ const TRANSLATIONS = {
     timezoneTitle: 'Timezone',
     newLevelReminderSent: '✅ Level created and reminder email sent!',
     newLevelReminderFailed: 'Level created, but the reminder email failed to send',
+    cropTitle: 'Crop image',
+    cropHint: 'Drag the image to adjust the crop area and use the slider to zoom',
+    cropConfirm: 'Confirm crop',
+    cropCancel: 'Cancel upload',
   }
 };
 
@@ -249,6 +266,11 @@ export default function App() {
   const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
+  const [cropSession, setCropSession] = useState<CropSession | null>(null);
+  const [cropPosition, setCropPosition] = useState({ x: 0, y: 0 });
+  const [cropZoom, setCropZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+  const [isCropping, setIsCropping] = useState(false);
 
   // ⏰ 提醒时间与时区状态
   const [reminderTime, setReminderTime] = useState<string>('08:00');
@@ -731,12 +753,67 @@ export default function App() {
     });
   };
 
+  const createCroppedImage = (imageSrc: string, cropArea: Area): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = cropArea.width;
+        canvas.height = cropArea.height;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          reject(new Error('Canvas is not supported'));
+          return;
+        }
+        context.drawImage(image, cropArea.x, cropArea.y, cropArea.width, cropArea.height, 0, 0, cropArea.width, cropArea.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.88));
+      };
+      image.onerror = () => reject(new Error('Unable to load image'));
+      image.src = imageSrc;
+    });
+  };
+
+  const openCropSession = (images: string[], target: CropTarget) => {
+    if (images.length === 0) return;
+    setCropSession({ images, currentIndex: 0, target });
+    setCropPosition({ x: 0, y: 0 });
+    setCropZoom(1);
+    setCroppedAreaPixels(null);
+  };
+
+  const finishCropSession = async () => {
+    if (!cropSession || !croppedAreaPixels || isCropping) return;
+    setIsCropping(true);
+    try {
+      const croppedImage = await createCroppedImage(cropSession.images[cropSession.currentIndex], croppedAreaPixels);
+      if (cropSession.target === 'new') {
+        setPreviewImages(prev => [...prev, croppedImage]);
+      } else {
+        setReviewNewImages(prev => [...prev, croppedImage]);
+        setAiFeedback('');
+      }
+      if (cropSession.currentIndex === cropSession.images.length - 1) {
+        setCropSession(null);
+      } else {
+        setCropSession(prev => prev ? { ...prev, currentIndex: prev.currentIndex + 1 } : null);
+        setCropPosition({ x: 0, y: 0 });
+        setCropZoom(1);
+        setCroppedAreaPixels(null);
+      }
+    } catch (error) {
+      console.error('图片裁剪失败:', error);
+      alert(lang === 'zh' ? '图片裁剪失败，请重试。' : 'Unable to crop this image. Please try again.');
+    } finally {
+      setIsCropping(false);
+    }
+  };
+
   const handleMultipleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
       const fileList = Array.from(files);
       const compressedList = await Promise.all(fileList.map(file => compressImage(file)));
-      setPreviewImages(prev => [...prev, ...compressedList]);
+      openCropSession(compressedList, 'new');
     }
     e.target.value = '';
   };
@@ -746,8 +823,7 @@ export default function App() {
     if (files && files.length > 0) {
       const fileList = Array.from(files);
       const compressedList = await Promise.all(fileList.map(file => compressImage(file)));
-      setReviewNewImages(prev => [...prev, ...compressedList]);
-      setAiFeedback('');
+      openCropSession(compressedList, 'review');
     }
     e.target.value = '';
   };
@@ -1762,6 +1838,44 @@ export default function App() {
           <span className="text-[10px]">{t.profile}</span>
         </button>
       </nav>
+
+      {cropSession && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#171824]/80 p-4 backdrop-blur-md">
+          <div className="w-full max-w-xl overflow-hidden rounded-[24px] border border-white/70 bg-white shadow-[0_28px_80px_rgba(16,18,30,0.35)]">
+            <div className="flex items-center justify-between border-b border-[#eceef3] px-5 py-4">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-black text-[#252838]"><Crop size={17} className="text-[#635bff]" />{t.cropTitle}</h2>
+                <p className="mt-1 text-[10px] font-semibold text-[#8b90a3]">{cropSession.currentIndex + 1} / {cropSession.images.length} · {t.cropHint}</p>
+              </div>
+              <button type="button" onClick={() => setCropSession(null)} className="grid h-9 w-9 place-items-center rounded-xl bg-[#f4f5f8] text-[#858a9d] hover:bg-[#eceef3]"><X size={16} /></button>
+            </div>
+            <div className="relative h-[min(62vh,420px)] w-full bg-[#171824]">
+              <Cropper
+                image={cropSession.images[cropSession.currentIndex]}
+                crop={cropPosition}
+                zoom={cropZoom}
+                aspect={4 / 3}
+                onCropChange={setCropPosition}
+                onZoomChange={setCropZoom}
+                onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
+                objectFit="contain"
+                classes={{ containerClassName: 'cropper-container' }}
+              />
+            </div>
+            <div className="space-y-4 px-5 py-5">
+              <label className="flex items-center gap-3 text-[10px] font-bold text-[#777c8f]">
+                <span className="shrink-0">缩放</span>
+                <input type="range" min={1} max={3} step={0.05} value={cropZoom} onChange={(event) => setCropZoom(Number(event.target.value))} className="h-1.5 w-full accent-[#635bff]" />
+                <span className="w-7 text-right">{cropZoom.toFixed(1)}x</span>
+              </label>
+              <div className="flex gap-3">
+                <button type="button" onClick={() => setCropSession(null)} className="flex-1 rounded-xl border border-[#e1e3eb] bg-[#f8f9fc] py-3 text-xs font-extrabold text-[#656a7d] hover:bg-[#eff0f5]">{t.cropCancel}</button>
+                <button type="button" onClick={finishCropSession} disabled={isCropping || !croppedAreaPixels} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#635bff] py-3 text-xs font-extrabold text-white shadow-[0_9px_20px_rgba(99,91,255,0.24)] hover:bg-[#554ce8] disabled:opacity-50"><Check size={15} />{isCropping ? '处理中...' : t.cropConfirm}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal 业务弹窗 */}
       {activeModalItem && (
