@@ -121,6 +121,25 @@ export function getNetworkErrorMessage(error: unknown, fallback: string) {
 
 const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+const MAX_STORED_IMAGE_DIMENSION = 800;
+const TARGET_STORED_IMAGE_BYTES = 280 * 1024;
+
+function getDataUrlBytes(dataUrl: string) {
+  const base64 = dataUrl.split(',')[1] || '';
+  return Math.ceil((base64.length * 3) / 4);
+}
+
+function encodeCanvasForStorage(canvas: HTMLCanvasElement) {
+  let quality = 0.82;
+  let dataUrl = canvas.toDataURL('image/jpeg', quality);
+
+  while (getDataUrlBytes(dataUrl) > TARGET_STORED_IMAGE_BYTES && quality > 0.5) {
+    quality = Math.max(0.5, quality - 0.08);
+    dataUrl = canvas.toDataURL('image/jpeg', quality);
+  }
+
+  return dataUrl;
+}
 
 function getCloudCompletedTaskIds(items: KnowledgeItem[], date: string) {
   return items.flatMap(item => {
@@ -292,8 +311,11 @@ export default function App() {
   const [cropSession, setCropSession] = useState<CropSession | null>(null);
   const [cropPosition, setCropPosition] = useState({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1);
+  const [cropAspect, setCropAspect] = useState<number | 'free'>(4 / 3);
+  const [freeCropSize, setFreeCropSize] = useState({ width: 320, height: 240 });
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
   const [isCropping, setIsCropping] = useState(false);
+  const [isSavingKnowledge, setIsSavingKnowledge] = useState(false);
 
   // ⏰ 提醒时间与时区状态
   const [reminderTime, setReminderTime] = useState<string>('08:00');
@@ -768,7 +790,7 @@ export default function App() {
         img.src = event.target?.result as string;
         img.onload = () => {
           const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 1200;
+          const MAX_WIDTH = 900;
           let width = img.width;
           let height = img.height;
 
@@ -782,7 +804,7 @@ export default function App() {
           const ctx = canvas.getContext('2d');
           ctx?.drawImage(img, 0, 0, width, height);
 
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+          const compressedDataUrl = encodeCanvasForStorage(canvas);
           resolve(compressedDataUrl);
         };
       };
@@ -795,15 +817,30 @@ export default function App() {
       const image = new Image();
       image.onload = () => {
         const canvas = document.createElement('canvas');
-        canvas.width = cropArea.width;
-        canvas.height = cropArea.height;
+        const outputScale = Math.min(
+          1,
+          MAX_STORED_IMAGE_DIMENSION / cropArea.width,
+          MAX_STORED_IMAGE_DIMENSION / cropArea.height
+        );
+        canvas.width = Math.max(1, Math.round(cropArea.width * outputScale));
+        canvas.height = Math.max(1, Math.round(cropArea.height * outputScale));
         const context = canvas.getContext('2d');
         if (!context) {
           reject(new Error('Canvas is not supported'));
           return;
         }
-        context.drawImage(image, cropArea.x, cropArea.y, cropArea.width, cropArea.height, 0, 0, cropArea.width, cropArea.height);
-        resolve(canvas.toDataURL('image/jpeg', 0.88));
+        context.drawImage(
+          image,
+          cropArea.x,
+          cropArea.y,
+          cropArea.width,
+          cropArea.height,
+          0,
+          0,
+          canvas.width,
+          canvas.height
+        );
+        resolve(encodeCanvasForStorage(canvas));
       };
       image.onerror = () => reject(new Error('Unable to load image'));
       image.src = imageSrc;
@@ -815,6 +852,8 @@ export default function App() {
     setCropSession({ images, currentIndex: 0, target });
     setCropPosition({ x: 0, y: 0 });
     setCropZoom(1);
+    setCropAspect(4 / 3);
+    setFreeCropSize({ width: 320, height: 240 });
     setCroppedAreaPixels(null);
   };
 
@@ -1024,7 +1063,9 @@ export default function App() {
   };
 
   const handleSaveNewKnowledge = async () => {
-    if (previewImages.length === 0 || !session) return;
+    if (previewImages.length === 0 || !session || isSavingKnowledge) return;
+
+    setIsSavingKnowledge(true);
 
     const autoTitle = newTitle.trim() || `${selectedUploadSubject} 知识卡`;
 
@@ -1050,6 +1091,7 @@ export default function App() {
     } catch (requestError) {
       console.error('保存新资料失败:', requestError);
       alert(`保存失败：${getNetworkErrorMessage(requestError, '无法保存资料，请稍后重试。')}`);
+      setIsSavingKnowledge(false);
       return;
     }
 
@@ -1072,6 +1114,7 @@ export default function App() {
     } else {
       alert(`保存失败：${getNetworkErrorMessage(error, '无法保存资料，请稍后重试。')}`);
     }
+    setIsSavingKnowledge(false);
   };
 
   const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber: number) => {
@@ -1405,9 +1448,10 @@ export default function App() {
 
                 <button
                   onClick={handleSaveNewKnowledge}
-                  className="w-full rounded-xl bg-[#635bff] py-3 text-xs font-extrabold text-white shadow-[0_9px_20px_rgba(99,91,255,0.24)] transition hover:bg-[#554ce8] disabled:opacity-50"
+                  disabled={isSavingKnowledge}
+                  className="w-full rounded-xl bg-[#635bff] py-3 text-xs font-extrabold text-white shadow-[0_9px_20px_rgba(99,91,255,0.24)] transition hover:bg-[#554ce8] disabled:cursor-wait disabled:opacity-50"
                 >
-                  {t.saveBtn(previewImages.length)}
+                  {isSavingKnowledge ? '保存中...' : t.saveBtn(previewImages.length)}
                 </button>
               </div>
             )}
@@ -1906,7 +1950,8 @@ export default function App() {
                 image={cropSession.images[cropSession.currentIndex]}
                 crop={cropPosition}
                 zoom={cropZoom}
-                aspect={4 / 3}
+                aspect={cropAspect === 'free' ? 4 / 3 : cropAspect}
+                cropSize={cropAspect === 'free' ? freeCropSize : undefined}
                 onCropChange={setCropPosition}
                 onZoomChange={setCropZoom}
                 onCropComplete={(_, pixels) => setCroppedAreaPixels(pixels)}
@@ -1915,6 +1960,50 @@ export default function App() {
               />
             </div>
             <div className="space-y-4 px-5 py-5">
+              <div>
+                <p className="mb-2 text-[10px] font-bold text-[#777c8f]">裁剪比例</p>
+                <div className="flex gap-2 overflow-x-auto pb-1">
+                  {([
+                    { label: '自由', value: 'free' as const },
+                    { label: '1:1', value: 1 },
+                    { label: '4:3', value: 4 / 3 },
+                    { label: '16:9', value: 16 / 9 },
+                    { label: '3:4', value: 3 / 4 },
+                    { label: '9:16', value: 9 / 16 },
+                  ]).map(option => {
+                    const selected = cropAspect === option.value;
+                    return (
+                      <button
+                        type="button"
+                        key={option.label}
+                        onClick={() => {
+                          setCropAspect(option.value);
+                          setCropPosition({ x: 0, y: 0 });
+                          setCropZoom(1);
+                          setCroppedAreaPixels(null);
+                        }}
+                        className={`shrink-0 rounded-lg px-3 py-1.5 text-[10px] font-extrabold transition ${selected ? 'bg-[#635bff] text-white shadow-sm' : 'bg-[#f4f5f8] text-[#777c8f] hover:bg-[#eceef4]'}`}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              {cropAspect === 'free' && (
+                <div className="space-y-2 rounded-xl bg-[#f8f9fc] p-3">
+                  <div className="flex items-center gap-3 text-[10px] font-bold text-[#777c8f]">
+                    <span className="w-9 shrink-0">宽度</span>
+                    <input type="range" min={180} max={360} value={freeCropSize.width} onChange={(event) => { setFreeCropSize(size => ({ ...size, width: Number(event.target.value) })); setCroppedAreaPixels(null); }} className="h-1.5 w-full accent-[#635bff]" />
+                    <span className="w-10 text-right">{freeCropSize.width}px</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-[10px] font-bold text-[#777c8f]">
+                    <span className="w-9 shrink-0">高度</span>
+                    <input type="range" min={120} max={300} value={freeCropSize.height} onChange={(event) => { setFreeCropSize(size => ({ ...size, height: Number(event.target.value) })); setCroppedAreaPixels(null); }} className="h-1.5 w-full accent-[#635bff]" />
+                    <span className="w-10 text-right">{freeCropSize.height}px</span>
+                  </div>
+                </div>
+              )}
               <label className="flex items-center gap-3 text-[10px] font-bold text-[#777c8f]">
                 <span className="shrink-0">缩放</span>
                 <input type="range" min={1} max={3} step={0.05} value={cropZoom} onChange={(event) => setCropZoom(Number(event.target.value))} className="h-1.5 w-full accent-[#635bff]" />
