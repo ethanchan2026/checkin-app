@@ -7,6 +7,7 @@ import {
   ArrowRight,
   Bell,
   BookOpenCheck,
+  CalendarClock,
   CalendarDays,
   Check,
   Crop,
@@ -14,6 +15,7 @@ import {
   FolderOpen,
   GraduationCap,
   Home,
+  History,
   ImageIcon,
   KeyRound,
   Languages,
@@ -25,6 +27,7 @@ import {
   Search,
   Settings2,
   Sparkles,
+  Star,
   Target,
   Trash2,
   Trophy,
@@ -75,6 +78,9 @@ interface RevisionLog {
   aiFeedback?: string;
   completed?: boolean;
   completedAt?: string;
+  kind?: 'metadata';
+  isMakeup?: boolean;
+  isStarred?: boolean;
 }
 
 interface KnowledgeItem {
@@ -121,8 +127,127 @@ export function getNetworkErrorMessage(error: unknown, fallback: string) {
 
 const DEFAULT_SUBJECTS = ['语文', '数学', '英语', '物理', '化学'];
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+const STARRED_MILESTONE_INTERVALS = [0, 1, 3, 7, 14, 21];
+const MAX_DAILY_TASKS = 3;
 const MAX_STORED_IMAGE_DIMENSION = 800;
 const TARGET_STORED_IMAGE_BYTES = 280 * 1024;
+
+function parseDate(date: string) {
+  return new Date(`${date}T00:00:00Z`);
+}
+
+function formatDate(date: Date) {
+  return date.toISOString().split('T')[0];
+}
+
+function addDays(date: string, days: number) {
+  const nextDate = parseDate(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() + days);
+  return formatDate(nextDate);
+}
+
+function daysBetween(start: string, end: string) {
+  return Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / 86400000);
+}
+
+function getItemMetadata(item: KnowledgeItem) {
+  const metadata = item.revisions?.find(revision => revision.kind === 'metadata' || revision.stage === '__metadata__');
+  return {
+    isMakeup: Boolean(metadata?.isMakeup),
+    isStarred: Boolean(metadata?.isStarred),
+  };
+}
+
+function getVisibleRevisions(item: KnowledgeItem) {
+  return (item.revisions || []).filter(revision => Number.isFinite(Number(revision.stage)));
+}
+
+function getExamAdjustedDate(
+  uploadDate: string,
+  originalDate: string,
+  examDate: string,
+  stageIndex: number,
+  stageCount: number
+) {
+  if (!examDate || examDate < uploadDate || originalDate <= examDate) return originalDate;
+  const availableDays = Math.max(0, daysBetween(uploadDate, examDate));
+  const compressedOffset = Math.round((availableDays * stageIndex) / Math.max(1, stageCount - 1));
+  return addDays(uploadDate, compressedOffset);
+}
+
+function buildReviewSchedule(items: KnowledgeItem[], today: string, examDate: string) {
+  const effectiveExamDate = examDate >= today ? examDate : '';
+  const candidates = items.flatMap(item => {
+    const metadata = getItemMetadata(item);
+    if (metadata.isMakeup) return [];
+
+    const offsets = metadata.isStarred ? STARRED_MILESTONE_INTERVALS : MILESTONE_INTERVALS;
+    const baseTasks = offsets.map((offset, stageIndex) => {
+      const originalDate = addDays(item.uploadDate, offset);
+      return {
+        item,
+        stageNumber: stageIndex + 1,
+        desiredDate: getExamAdjustedDate(
+          item.uploadDate,
+          originalDate,
+          effectiveExamDate,
+          stageIndex,
+          offsets.length
+        ),
+        isStarred: metadata.isStarred,
+      };
+    });
+
+    const monthlyTasks: typeof baseTasks = [];
+    const horizon = effectiveExamDate || addDays(today, 60);
+    let monthlyOffset = 55;
+    let stageNumber = offsets.length + 1;
+    while (addDays(item.uploadDate, monthlyOffset) <= horizon) {
+      monthlyTasks.push({
+        item,
+        stageNumber,
+        desiredDate: addDays(item.uploadDate, monthlyOffset),
+        isStarred: metadata.isStarred,
+      });
+      monthlyOffset += 30;
+      stageNumber += 1;
+    }
+
+    return [...baseTasks, ...monthlyTasks];
+  });
+
+  candidates.sort((left, right) =>
+    left.desiredDate.localeCompare(right.desiredDate)
+    || Number(right.isStarred) - Number(left.isStarred)
+    || left.item.uploadDate.localeCompare(right.item.uploadDate)
+    || left.stageNumber - right.stageNumber
+  );
+
+  const occupancy = new Map<string, number>();
+  return candidates.flatMap(candidate => {
+    const lastAllowedDate = effectiveExamDate && effectiveExamDate >= candidate.item.uploadDate
+      ? effectiveExamDate
+      : addDays(candidate.desiredDate, 365);
+    let scheduledDate = candidate.desiredDate;
+
+    while ((occupancy.get(scheduledDate) || 0) >= MAX_DAILY_TASKS && scheduledDate < lastAllowedDate) {
+      scheduledDate = addDays(scheduledDate, 1);
+    }
+
+    if ((occupancy.get(scheduledDate) || 0) >= MAX_DAILY_TASKS || scheduledDate > lastAllowedDate) {
+      let fallbackDate = lastAllowedDate;
+      const earliestDate = candidate.item.uploadDate > today ? candidate.item.uploadDate : today;
+      while ((occupancy.get(fallbackDate) || 0) >= MAX_DAILY_TASKS && fallbackDate > earliestDate) {
+        fallbackDate = addDays(fallbackDate, -1);
+      }
+      if ((occupancy.get(fallbackDate) || 0) >= MAX_DAILY_TASKS || fallbackDate < earliestDate) return [];
+      scheduledDate = fallbackDate;
+    }
+
+    occupancy.set(scheduledDate, (occupancy.get(scheduledDate) || 0) + 1);
+    return [{ ...candidate, scheduledDate }];
+  });
+}
 
 function getDataUrlBytes(dataUrl: string) {
   const base64 = dataUrl.split(',')[1] || '';
@@ -306,6 +431,8 @@ export default function App() {
   // 📸 上传表单状态
   const [newTitle, setNewTitle] = useState<string>('');
   const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
+  const [uploadMode, setUploadMode] = useState<'study' | 'makeup'>('study');
+  const [isUploadStarred, setIsUploadStarred] = useState(false);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
   const [cropSession, setCropSession] = useState<CropSession | null>(null);
@@ -320,6 +447,9 @@ export default function App() {
   // ⏰ 提醒时间与时区状态
   const [reminderTime, setReminderTime] = useState<string>('08:00');
   const [userTimezone, setUserTimezone] = useState<string>('Asia/Shanghai');
+  const [examDate, setExamDate] = useState<string>('');
+  const [isSavingExamDate, setIsSavingExamDate] = useState(false);
+  const [databaseView, setDatabaseView] = useState<'study' | 'makeup'>('study');
 
   // 🤖 API Key 与 AI 纠错状态
   const [userApiKey, setUserApiKey] = useState<string>(() => {
@@ -368,6 +498,8 @@ export default function App() {
 
   useEffect(() => {
     if (session) {
+      const savedExamDate = session.user?.user_metadata?.exam_date;
+      setExamDate(typeof savedExamDate === 'string' ? savedExamDate : '');
       fetchData();
       fetchCustomSubjects();
       fetchUserProfile();
@@ -401,26 +533,9 @@ export default function App() {
     return new Date().toISOString().split('T')[0];
   }
 
-  function getDaysPassed(dateStr: string) {
-    const start = new Date(dateStr).getTime();
-    const today = new Date(getTodayStr()).getTime();
-    return Math.floor((today - start) / (1000 * 60 * 60 * 24));
-  }
-
-  const todayTasks = items.flatMap(item => {
-    const daysPassed = getDaysPassed(item.uploadDate);
-    const stageIndex = MILESTONE_INTERVALS.indexOf(daysPassed);
-    if (stageIndex !== -1) {
-      return [{ item, stageNumber: stageIndex + 1 }];
-    }
-
-    if (daysPassed > 25 && (daysPassed - 25) % 30 === 0) {
-      const monthlyCycle = Math.floor((daysPassed - 25) / 30);
-      return [{ item, stageNumber: 5 + monthlyCycle }];
-    }
-
-    return [];
-  });
+  const todayTasks = buildReviewSchedule(items, getTodayStr(), examDate)
+    .filter(task => task.scheduledDate === getTodayStr())
+    .sort((left, right) => Number(right.isStarred) - Number(left.isStarred));
 
   const sendReviewReminderEmail = async (tasks: Array<{ item: KnowledgeItem; stageNumber: number }>) => {
     const recipientEmail = session?.user?.email;
@@ -488,6 +603,23 @@ export default function App() {
         timezone: newTz,
         updated_at: new Date().toISOString(),
       });
+  };
+
+  const handleSaveExamDate = async (newExamDate: string) => {
+    setExamDate(newExamDate);
+    if (!session?.user?.id) return;
+
+    setIsSavingExamDate(true);
+    const { data, error } = await supabase.auth.updateUser({
+      data: { exam_date: newExamDate || null },
+    });
+    setIsSavingExamDate(false);
+
+    if (error) {
+      alert(`考试日期保存失败：${getNetworkErrorMessage(error, '请稍后重试。')}`);
+      return;
+    }
+    if (data.user) setSession({ ...session, user: data.user });
   };
 
   async function fetchCustomSubjects() {
@@ -1068,6 +1200,13 @@ export default function App() {
     setIsSavingKnowledge(true);
 
     const autoTitle = newTitle.trim() || `${selectedUploadSubject} 知识卡`;
+    const metadataRevision: RevisionLog = {
+      stage: '__metadata__',
+      date: getTodayStr(),
+      kind: 'metadata',
+      isMakeup: uploadMode === 'makeup',
+      isStarred: uploadMode === 'study' && isUploadStarred,
+    };
 
     const newItemData = {
       title: autoTitle,
@@ -1075,7 +1214,7 @@ export default function App() {
       imageUrl: previewImages[0],
       imageUrls: previewImages,
       uploadDate: getTodayStr(),
-      revisions: [],
+      revisions: [metadataRevision],
       user_id: session.user.id,
       user_email: session.user.email
     };
@@ -1097,19 +1236,35 @@ export default function App() {
 
     if (!error && data?.id) {
       const createdItem = { ...newItemData, id: data.id } as KnowledgeItem;
-      setItems([createdItem, ...items]);
+      const updatedItems = [createdItem, ...items];
+      setItems(updatedItems);
       setPreviewImages([]);
       setNewTitle('');
+      setUploadMode('study');
+      setIsUploadStarred(false);
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       fetchLeaderboard();
 
-      try {
-        await sendReviewReminderEmail([{ item: createdItem, stageNumber: 1 }]);
-        alert(t.newLevelReminderSent);
-      } catch (err: any) {
-        console.error('新增关卡提醒邮件发送失败:', err);
-        const errorMessage = err?.text || err?.message || (lang === 'zh' ? '请检查邮件配置' : 'Please check the email configuration');
-        alert(`${t.newLevelReminderFailed}: ${errorMessage}`);
+      if (uploadMode === 'makeup') {
+        alert(lang === 'zh' ? '✅ 补打卡记录已保存！' : '✅ Make-up check-in saved!');
+      } else {
+        const firstReview = buildReviewSchedule(updatedItems, getTodayStr(), examDate)
+          .find(task => task.item.id === createdItem.id && task.stageNumber === 1);
+        if (firstReview?.scheduledDate !== getTodayStr()) {
+          alert(lang === 'zh'
+            ? `✅ 资料已保存。今日任务已满，首次复习已安排到 ${firstReview?.scheduledDate || '下一个空闲日期'}。`
+            : `✅ Saved. Today is full, so the first review is scheduled for ${firstReview?.scheduledDate || 'the next available date'}.`
+          );
+        } else {
+          try {
+            await sendReviewReminderEmail([{ item: createdItem, stageNumber: 1 }]);
+            alert(t.newLevelReminderSent);
+          } catch (err: any) {
+            console.error('新增关卡提醒邮件发送失败:', err);
+            const errorMessage = err?.text || err?.message || (lang === 'zh' ? '请检查邮件配置' : 'Please check the email configuration');
+            alert(`${t.newLevelReminderFailed}: ${errorMessage}`);
+          }
+        }
       }
     } else {
       alert(`保存失败：${getNetworkErrorMessage(error, '无法保存资料，请稍后重试。')}`);
@@ -1214,6 +1369,8 @@ export default function App() {
   };
 
   const filteredDatabaseItems = items.filter(item => {
+    const metadata = getItemMetadata(item);
+    if (databaseView === 'makeup' ? !metadata.isMakeup : metadata.isMakeup) return false;
     const matchSubject = selectedSubject === 'ALL' || item.subject === selectedSubject;
     const query = searchQuery.trim().toLowerCase();
     if (!query) return matchSubject;
@@ -1397,6 +1554,40 @@ export default function App() {
               </button>
             </div>
 
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f7f8fb] p-1.5">
+              <button
+                type="button"
+                onClick={() => setUploadMode('study')}
+                className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-extrabold transition ${uploadMode === 'study' ? 'bg-white text-[#635bff] shadow-sm' : 'text-[#7d8295]'}`}
+              >
+                <BookOpenCheck size={14} /> 新建复习任务
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUploadMode('makeup');
+                  setIsUploadStarred(false);
+                }}
+                className={`flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-extrabold transition ${uploadMode === 'makeup' ? 'bg-white text-[#e58b25] shadow-sm' : 'text-[#7d8295]'}`}
+              >
+                <History size={14} /> 补打卡
+              </button>
+            </div>
+
+            {uploadMode === 'study' && (
+              <button
+                type="button"
+                onClick={() => setIsUploadStarred(current => !current)}
+                className={`flex w-full items-center justify-between rounded-2xl border px-3.5 py-3 text-left transition ${isUploadStarred ? 'border-[#f3cf76] bg-[#fff9e8]' : 'border-[#e5e7ef] bg-white hover:border-[#d6d8e2]'}`}
+              >
+                <span className="flex items-center gap-2.5">
+                  <span className={`grid h-8 w-8 place-items-center rounded-xl ${isUploadStarred ? 'bg-[#ffd967] text-[#9b6500]' : 'bg-[#f4f5f8] text-[#9599aa]'}`}><Star size={16} fill={isUploadStarred ? 'currentColor' : 'none'} /></span>
+                  <span><strong className="block text-[11px] text-[#414558]">星标重点复习</strong><span className="mt-0.5 block text-[9px] font-medium text-[#9195a7]">增加复习频率，并优先安排每日关卡</span></span>
+                </span>
+                <span className={`h-5 w-9 rounded-full p-0.5 transition ${isUploadStarred ? 'bg-[#635bff]' : 'bg-[#d9dce5]'}`}><span className={`block h-4 w-4 rounded-full bg-white transition ${isUploadStarred ? 'translate-x-4' : ''}`} /></span>
+              </button>
+            )}
+
             <label className="block cursor-pointer rounded-2xl border border-dashed border-[#cfd2df] bg-[#fbfbfd] p-5 text-center transition-all hover:border-[#9b95ff] hover:bg-[#f5f4ff]">
               <span className="mx-auto mb-2 grid h-10 w-10 place-items-center rounded-xl bg-white text-[#635bff] shadow-sm"><UploadCloud size={19} /></span>
               <span className="block text-[11px] font-extrabold text-[#4b4f62]">{t.clickUpload}</span>
@@ -1451,7 +1642,11 @@ export default function App() {
                   disabled={isSavingKnowledge}
                   className="w-full rounded-xl bg-[#635bff] py-3 text-xs font-extrabold text-white shadow-[0_9px_20px_rgba(99,91,255,0.24)] transition hover:bg-[#554ce8] disabled:cursor-wait disabled:opacity-50"
                 >
-                  {isSavingKnowledge ? '保存中...' : t.saveBtn(previewImages.length)}
+                  {isSavingKnowledge
+                    ? '保存中...'
+                    : uploadMode === 'makeup'
+                      ? `保存 ${previewImages.length} 张补打卡记录`
+                      : t.saveBtn(previewImages.length)}
                 </button>
               </div>
             )}
@@ -1462,7 +1657,7 @@ export default function App() {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Target size={18} /></div>
-                <div><h2 className="text-sm font-black">{t.todayTasks}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '根据 1357 记忆节奏生成' : 'Built from your 1357 review rhythm'}</p></div>
+                <div><h2 className="text-sm font-black">{t.todayTasks}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '智能错峰安排，每日最多 3 项' : 'Smart scheduling, up to 3 tasks daily'}</p></div>
               </div>
               <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">
                 {todayTasks.length} 关卡
@@ -1495,7 +1690,7 @@ export default function App() {
                       }`}
                     >
                       <div className="min-w-0 pr-4">
-                        <div className="mb-2 flex items-center gap-2 text-[9px] font-bold opacity-80"><span className="rounded-lg bg-white/15 px-2 py-1">第 {index + 1} 关</span><span>{stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}</span></div>
+                        <div className="mb-2 flex items-center gap-2 text-[9px] font-bold opacity-80"><span className="rounded-lg bg-white/15 px-2 py-1">第 {index + 1} 关</span><span>{stageNumber === 1 ? t.initialReview : t.dayStageText(stageNumber)}</span>{getItemMetadata(item).isStarred && <span className="flex items-center gap-1 rounded-lg bg-[#ffd967] px-2 py-1 text-[#6e4900]"><Star size={10} fill="currentColor" /> 重点</span>}</div>
                         <p className="truncate text-base font-black sm:text-lg">{displayTitle}</p>
                         <p className="mt-1 truncate text-[10px] font-semibold opacity-70">{item.subject} · {lang === 'zh' ? '回顾笔记并完成一次主动复述' : 'Review notes and complete an active recall'}</p>
                       </div>
@@ -1522,9 +1717,26 @@ export default function App() {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e9f8f2] text-[#16a776]"><FolderOpen size={18} /></div>
-                <div><h2 className="text-sm font-black">{t.databaseTitle}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '管理所有知识卡与复习记录' : 'Manage cards and review history'}</p></div>
+                <div><h2 className="text-sm font-black">{databaseView === 'study' ? t.databaseTitle : (lang === 'zh' ? '补打卡数据库' : 'Make-up check-ins')}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{databaseView === 'study' ? (lang === 'zh' ? '管理所有知识卡与复习记录' : 'Manage cards and review history') : (lang === 'zh' ? '单独保存过去遗漏的打卡内容' : 'Past make-up records kept separately')}</p></div>
               </div>
               <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">{filteredDatabaseItems.length} 套</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f7f8fb] p-1.5">
+              <button
+                type="button"
+                onClick={() => setDatabaseView('study')}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[10px] font-extrabold transition ${databaseView === 'study' ? 'bg-white text-[#635bff] shadow-sm' : 'text-[#7d8295]'}`}
+              >
+                <FolderOpen size={13} /> 复习资料
+              </button>
+              <button
+                type="button"
+                onClick={() => setDatabaseView('makeup')}
+                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[10px] font-extrabold transition ${databaseView === 'makeup' ? 'bg-white text-[#e58b25] shadow-sm' : 'text-[#7d8295]'}`}
+              >
+                <History size={13} /> 补打卡记录
+              </button>
             </div>
 
             <div className="relative flex items-center">
@@ -1579,6 +1791,7 @@ export default function App() {
             ) : (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                 {filteredDatabaseItems.map(item => {
+                  const metadata = getItemMetadata(item);
                   const itemImages = getItemImages(item);
                   const revImagesCount = item.revisions?.reduce((sum, rev) => sum + getRevisionImages(rev).length, 0) || 0;
                   const totalPhotos = itemImages.length + revImagesCount;
@@ -1602,6 +1815,12 @@ export default function App() {
                         <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-[#2b2e3d]/80 px-2 py-1 text-[9px] font-extrabold text-white backdrop-blur-sm">
                           <ImageIcon size={11} /> {totalPhotos} {t.totalPhotos}
                         </div>
+                        {(metadata.isStarred || metadata.isMakeup) && (
+                          <div className={`absolute left-2 top-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-extrabold backdrop-blur-sm ${metadata.isStarred ? 'bg-[#ffd967]/95 text-[#684500]' : 'bg-[#fff4e5]/95 text-[#b66a13]'}`}>
+                            {metadata.isStarred ? <Star size={10} fill="currentColor" /> : <History size={10} />}
+                            {metadata.isStarred ? '重点' : '补打卡'}
+                          </div>
+                        )}
                       </div>
 
                       <div className="px-0.5">
@@ -1789,6 +2008,32 @@ export default function App() {
                     ))}
                   </select>
                 </div>
+              </div>
+
+              <div className="rounded-2xl border border-[#e8eaf1] bg-[#f8f9fc] p-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <CalendarClock size={17} className="shrink-0 text-[#635bff]" />
+                    <div>
+                      <p className="text-xs font-bold text-slate-700">{lang === 'zh' ? '考试日期' : 'Exam date'}</p>
+                      <p className="text-[10px] text-slate-400">{lang === 'zh' ? '剩余复习会自动压缩到考试前，每日仍不超过 3 项' : 'Reviews are rescheduled before the exam, up to 3 daily'}</p>
+                    </div>
+                  </div>
+                  <input
+                    type="date"
+                    min={getTodayStr()}
+                    value={examDate}
+                    disabled={isSavingExamDate}
+                    onChange={(event) => handleSaveExamDate(event.target.value)}
+                    className="w-[132px] shrink-0 rounded-xl border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-bold text-slate-700 outline-none focus:border-indigo-500 disabled:opacity-60"
+                  />
+                </div>
+                {examDate && (
+                  <div className="mt-3 flex items-center justify-between border-t border-slate-200/70 pt-3 text-[10px] font-semibold text-[#777c8f]">
+                    <span>{lang === 'zh' ? `距离考试还有 ${Math.max(0, daysBetween(getTodayStr(), examDate))} 天` : `${Math.max(0, daysBetween(getTodayStr(), examDate))} days remaining`}</span>
+                    <button type="button" onClick={() => handleSaveExamDate('')} className="font-extrabold text-[#d87070] hover:text-red-600">{lang === 'zh' ? '清除日期' : 'Clear'}</button>
+                  </div>
+                )}
               </div>
 
               {/* 🔑 API Key 设置 */}
@@ -2180,8 +2425,8 @@ export default function App() {
                   </div>
                 </div>
 
-                {activeModalItem.item.revisions && activeModalItem.item.revisions.length > 0 && (
-                  activeModalItem.item.revisions.map((rev, idx) => {
+                {getVisibleRevisions(activeModalItem.item).length > 0 && (
+                  getVisibleRevisions(activeModalItem.item).map((rev, idx) => {
                     const revImgs = getRevisionImages(rev);
                     return (
                       <div key={idx} className="bg-indigo-50/60 rounded-2xl p-3 border border-indigo-100 space-y-2">

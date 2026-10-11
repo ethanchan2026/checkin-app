@@ -35,6 +35,110 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
 });
 
 const MILESTONE_INTERVALS = [0, 1, 4, 11, 25];
+const STARRED_MILESTONE_INTERVALS = [0, 1, 3, 7, 14, 21];
+const MAX_DAILY_TASKS = 3;
+
+function parseDate(date) {
+  return new Date(`${date}T00:00:00Z`);
+}
+
+function formatDate(date) {
+  return date.toISOString().split('T')[0];
+}
+
+function addDays(date, days) {
+  const nextDate = parseDate(date);
+  nextDate.setUTCDate(nextDate.getUTCDate() + days);
+  return formatDate(nextDate);
+}
+
+function daysBetween(start, end) {
+  return Math.round((parseDate(end).getTime() - parseDate(start).getTime()) / 86400000);
+}
+
+function getItemMetadata(item) {
+  const metadata = Array.isArray(item.revisions)
+    ? item.revisions.find(revision => revision.kind === 'metadata' || revision.stage === '__metadata__')
+    : null;
+  return {
+    isMakeup: Boolean(metadata?.isMakeup),
+    isStarred: Boolean(metadata?.isStarred),
+  };
+}
+
+function getExamAdjustedDate(uploadDate, originalDate, examDate, stageIndex, stageCount) {
+  if (!examDate || examDate < uploadDate || originalDate <= examDate) return originalDate;
+  const availableDays = Math.max(0, daysBetween(uploadDate, examDate));
+  const compressedOffset = Math.round((availableDays * stageIndex) / Math.max(1, stageCount - 1));
+  return addDays(uploadDate, compressedOffset);
+}
+
+function buildReviewSchedule(items, today, examDate = '') {
+  const effectiveExamDate = examDate >= today ? examDate : '';
+  const candidates = items.flatMap(item => {
+    const metadata = getItemMetadata(item);
+    if (metadata.isMakeup) return [];
+
+    const offsets = metadata.isStarred ? STARRED_MILESTONE_INTERVALS : MILESTONE_INTERVALS;
+    const baseTasks = offsets.map((offset, stageIndex) => {
+      const originalDate = addDays(item.uploadDate, offset);
+      return {
+        item,
+        stageNumber: stageIndex + 1,
+        desiredDate: getExamAdjustedDate(item.uploadDate, originalDate, effectiveExamDate, stageIndex, offsets.length),
+        isStarred: metadata.isStarred,
+      };
+    });
+
+    const monthlyTasks = [];
+    const horizon = effectiveExamDate || addDays(today, 60);
+    let monthlyOffset = 55;
+    let stageNumber = offsets.length + 1;
+    while (addDays(item.uploadDate, monthlyOffset) <= horizon) {
+      monthlyTasks.push({
+        item,
+        stageNumber,
+        desiredDate: addDays(item.uploadDate, monthlyOffset),
+        isStarred: metadata.isStarred,
+      });
+      monthlyOffset += 30;
+      stageNumber += 1;
+    }
+    return [...baseTasks, ...monthlyTasks];
+  });
+
+  candidates.sort((left, right) =>
+    left.desiredDate.localeCompare(right.desiredDate)
+    || Number(right.isStarred) - Number(left.isStarred)
+    || left.item.uploadDate.localeCompare(right.item.uploadDate)
+    || left.stageNumber - right.stageNumber
+  );
+
+  const occupancy = new Map();
+  return candidates.flatMap(candidate => {
+    const lastAllowedDate = effectiveExamDate && effectiveExamDate >= candidate.item.uploadDate
+      ? effectiveExamDate
+      : addDays(candidate.desiredDate, 365);
+    let scheduledDate = candidate.desiredDate;
+
+    while ((occupancy.get(scheduledDate) || 0) >= MAX_DAILY_TASKS && scheduledDate < lastAllowedDate) {
+      scheduledDate = addDays(scheduledDate, 1);
+    }
+
+    if ((occupancy.get(scheduledDate) || 0) >= MAX_DAILY_TASKS || scheduledDate > lastAllowedDate) {
+      let fallbackDate = lastAllowedDate;
+      const earliestDate = candidate.item.uploadDate > today ? candidate.item.uploadDate : today;
+      while ((occupancy.get(fallbackDate) || 0) >= MAX_DAILY_TASKS && fallbackDate > earliestDate) {
+        fallbackDate = addDays(fallbackDate, -1);
+      }
+      if ((occupancy.get(fallbackDate) || 0) >= MAX_DAILY_TASKS || fallbackDate < earliestDate) return [];
+      scheduledDate = fallbackDate;
+    }
+
+    occupancy.set(scheduledDate, (occupancy.get(scheduledDate) || 0) + 1);
+    return [{ ...candidate, scheduledDate }];
+  });
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -73,12 +177,6 @@ function getTodayStrInTimezone(timezone = 'Asia/Shanghai') {
   }
 }
 
-function getDaysPassed(dateStr, todayStr) {
-  const start = new Date(dateStr).getTime();
-  const today = new Date(todayStr).getTime();
-  return Math.floor((today - start) / (1000 * 60 * 60 * 24));
-}
-
 async function run() {
   console.log('🚀 开始基于多时区调度复习任务扫描...');
   if (FORCE_SEND) {
@@ -114,14 +212,32 @@ async function run() {
     process.exit(1);
   }
 
+  const { data: authUsersData, error: authUsersError } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+  if (authUsersError) {
+    console.warn(`⚠️ 无法读取考试日期，将按普通计划发送：${authUsersError.message}`);
+  }
+  const examDateMap = {};
+  authUsersData?.users?.forEach(user => {
+    if (typeof user.user_metadata?.exam_date === 'string') {
+      examDateMap[user.id] = user.user_metadata.exam_date;
+    }
+  });
+
   // 3. 逐个用户判断是否符合其本地时间的提醒条件
   const userTasksMap = {};
-
+  const itemsByUser = {};
   items.forEach(item => {
-    if (!item.user_email) return;
-    if (TARGET_EMAIL && item.user_email.toLowerCase() !== TARGET_EMAIL) return;
+    if (!item.user_id || !item.user_email) return;
+    if (!itemsByUser[item.user_id]) itemsByUser[item.user_id] = [];
+    itemsByUser[item.user_id].push(item);
+  });
 
-    const config = userConfigMap[item.user_id] || {
+  Object.entries(itemsByUser).forEach(([userId, userItems]) => {
+    const email = userItems[0]?.user_email;
+    if (!email) return;
+    if (TARGET_EMAIL && email.toLowerCase() !== TARGET_EMAIL) return;
+
+    const config = userConfigMap[userId] || {
       reminder_time: '08:00',
       timezone: 'Asia/Shanghai',
     };
@@ -135,29 +251,23 @@ async function run() {
       return;
     }
 
-    const daysPassed = getDaysPassed(item.uploadDate, userTodayStr);
-    let stageNumber = null;
+    const todayTasks = buildReviewSchedule(userItems, userTodayStr, examDateMap[userId] || '')
+      .filter(task => task.scheduledDate === userTodayStr)
+      .filter(task => !task.item.revisions?.some(revision =>
+        Number(revision.stage) === task.stageNumber && revision.date === userTodayStr
+      ))
+      .sort((left, right) => Number(right.isStarred) - Number(left.isStarred));
 
-    const milestoneIdx = MILESTONE_INTERVALS.indexOf(daysPassed);
-    if (milestoneIdx !== -1) {
-      stageNumber = milestoneIdx + 1;
-    } else if (daysPassed > 25 && (daysPassed - 25) % 30 === 0) {
-      stageNumber = 5 + Math.floor((daysPassed - 25) / 30);
-    }
-
-    if (stageNumber !== null) {
-      if (!userTasksMap[item.user_email]) {
-        userTasksMap[item.user_email] = {
-          tasks: [],
-          todayStr: userTodayStr,
-          timezone: config.timezone,
-        };
-      }
-      const title = item.title || item.subject;
-      userTasksMap[item.user_email].tasks.push(
-        `[${item.subject}] ${title} (第 ${stageNumber} 轮复习)`
-      );
-    }
+    if (todayTasks.length === 0) return;
+    userTasksMap[email] = {
+      tasks: todayTasks.map(task => {
+        const title = task.item.title || task.item.subject;
+        const priority = task.isStarred ? '⭐ ' : '';
+        return `${priority}[${task.item.subject}] ${title} (第 ${task.stageNumber} 轮复习)`;
+      }),
+      todayStr: userTodayStr,
+      timezone: config.timezone,
+    };
   });
 
   const targetEmails = Object.keys(userTasksMap);
