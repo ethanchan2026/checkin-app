@@ -81,6 +81,7 @@ interface RevisionLog {
   kind?: 'metadata';
   isMakeup?: boolean;
   isStarred?: boolean;
+  makeupStage?: number;
 }
 
 interface KnowledgeItem {
@@ -155,6 +156,7 @@ function getItemMetadata(item: KnowledgeItem) {
   return {
     isMakeup: Boolean(metadata?.isMakeup),
     isStarred: Boolean(metadata?.isStarred),
+    makeupStage: metadata?.makeupStage,
   };
 }
 
@@ -413,7 +415,7 @@ export default function App() {
   );
   const t = TRANSLATIONS[lang];
 
-  const [currentTab, setCurrentTab] = useState<'home' | 'leaderboard' | 'profile'>('home');
+  const [currentTab, setCurrentTab] = useState<'home' | 'leaderboard' | 'database' | 'profile'>('home');
   const [subjects, setSubjects] = useState<string[]>(DEFAULT_SUBJECTS);
 
   const [streak, setStreak] = useState<number>(1);
@@ -432,6 +434,8 @@ export default function App() {
   const [newTitle, setNewTitle] = useState<string>('');
   const [selectedUploadSubject, setSelectedUploadSubject] = useState<string>('语文');
   const [uploadMode, setUploadMode] = useState<'study' | 'makeup'>('study');
+  const [isUploadOpen, setIsUploadOpen] = useState(false);
+  const [makeupStage, setMakeupStage] = useState(1);
   const [isUploadStarred, setIsUploadStarred] = useState(false);
   const [previewImages, setPreviewImages] = useState<string[]>([]);
   const [reviewNewImages, setReviewNewImages] = useState<string[]>([]);
@@ -450,6 +454,8 @@ export default function App() {
   const [examDate, setExamDate] = useState<string>('');
   const [isSavingExamDate, setIsSavingExamDate] = useState(false);
   const [databaseView, setDatabaseView] = useState<'study' | 'makeup'>('study');
+  const [isScheduleOpen, setIsScheduleOpen] = useState(false);
+  const [selectedScheduleDate, setSelectedScheduleDate] = useState(getTodayStr());
 
   // 🤖 API Key 与 AI 纠错状态
   const [userApiKey, setUserApiKey] = useState<string>(() => {
@@ -536,6 +542,10 @@ export default function App() {
   const todayTasks = buildReviewSchedule(items, getTodayStr(), examDate)
     .filter(task => task.scheduledDate === getTodayStr())
     .sort((left, right) => Number(right.isStarred) - Number(left.isStarred));
+  const scheduledReviews = buildReviewSchedule(items, getTodayStr(), examDate);
+  const scheduleHorizon = examDate && examDate >= getTodayStr() ? examDate : addDays(getTodayStr(), 20);
+  const scheduleDays = Array.from({ length: Math.min(31, Math.max(1, daysBetween(getTodayStr(), scheduleHorizon) + 1)) }, (_, index) => addDays(getTodayStr(), index));
+  const selectedDayTasks = scheduledReviews.filter(task => task.scheduledDate === selectedScheduleDate);
 
   const sendReviewReminderEmail = async (tasks: Array<{ item: KnowledgeItem; stageNumber: number }>) => {
     const recipientEmail = session?.user?.email;
@@ -652,6 +662,18 @@ export default function App() {
         }
       }
     }
+  };
+
+  const handleDeleteCustomSubject = async (subject: string) => {
+    if (DEFAULT_SUBJECTS.includes(subject) || !session?.user?.id) return;
+    if (!window.confirm(`确定删除自定义科目“${subject}”吗？已有资料不会被删除。`)) return;
+    const { error } = await supabase.from('custom_subjects').delete().eq('user_id', session.user.id).eq('name', subject);
+    if (error) {
+      alert(`删除失败：${error.message}`);
+      return;
+    }
+    setSubjects(current => current.filter(name => name !== subject));
+    if (selectedUploadSubject === subject) setSelectedUploadSubject(DEFAULT_SUBJECTS[0]);
   };
 
   const handleConfigureApiKey = () => {
@@ -1206,6 +1228,7 @@ export default function App() {
       kind: 'metadata',
       isMakeup: uploadMode === 'makeup',
       isStarred: uploadMode === 'study' && isUploadStarred,
+      makeupStage: uploadMode === 'makeup' ? makeupStage : undefined,
     };
 
     const newItemData = {
@@ -1242,6 +1265,8 @@ export default function App() {
       setNewTitle('');
       setUploadMode('study');
       setIsUploadStarred(false);
+      setMakeupStage(1);
+      setIsUploadOpen(false);
       confetti({ particleCount: 50, spread: 60, origin: { y: 0.7 } });
       fetchLeaderboard();
 
@@ -1421,6 +1446,7 @@ export default function App() {
           {([
             { key: 'home' as const, label: t.home, icon: Home },
             { key: 'leaderboard' as const, label: t.leaderboard, icon: Trophy },
+            { key: 'database' as const, label: '资料库', icon: FolderOpen },
             { key: 'profile' as const, label: t.profile, icon: UserRound },
           ]).map(({ key, label, icon: NavIcon }) => (
             <button
@@ -1493,9 +1519,9 @@ export default function App() {
       </header>
 
       {/* 1. 🏠 主页 */}
-      {currentTab === 'home' && (
-        <main className="mx-auto grid w-full max-w-[1260px] grid-cols-1 gap-5 px-4 py-6 pb-28 sm:px-6 lg:px-8 lg:pb-10 xl:grid-cols-3">
-          <div className="flex items-end justify-between xl:col-span-3">
+      {(currentTab === 'home' || currentTab === 'database') && (
+        <main className={`mx-auto grid w-full max-w-[1260px] grid-cols-1 gap-5 px-4 py-6 pb-28 sm:px-6 lg:px-8 lg:pb-10 xl:grid-cols-3 ${currentTab === 'database' ? 'xl:grid-cols-1' : ''}`}>
+          <div className={`${currentTab === 'database' ? 'hidden' : 'flex'} items-end justify-between xl:col-span-3`}>
             <div>
               <h1 className="text-2xl font-black tracking-[-0.04em] text-[#191b28] sm:text-3xl">
                 {lang === 'zh' ? '继续今天的学习' : 'Continue today’s learning'}
@@ -1511,19 +1537,27 @@ export default function App() {
             </div>
           </div>
 
-          {loading && (
+          {loading && currentTab === 'home' && (
             <div className="rounded-xl bg-[#efefff] py-2 text-center text-xs font-bold text-[#635bff] animate-pulse xl:col-span-3">
               {lang === 'zh' ? '正在同步云端资料...' : 'Syncing cloud data...'}
             </div>
           )}
 
           {/* 📸 上传新资料 */}
-          <section className="order-2 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-2">
+          <section className={`${currentTab === 'database' || isUploadOpen ? (isUploadOpen ? 'fixed inset-0 z-40 m-0 overflow-y-auto rounded-none p-4 sm:p-8' : 'hidden') : 'order-2 rounded-[24px] p-5'} space-y-4 border border-[#e6e8f0] bg-white shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-2`}>
             <div className="flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Plus size={18} /></div>
-              <div><h2 className="text-sm font-black">{lang === 'zh' ? '新建学习卡' : 'Create study card'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '上传资料并生成复习计划' : 'Upload notes and build a review plan'}</p></div>
+              <div className="min-w-0"><h2 className="text-sm font-black">{lang === 'zh' ? '新建学习卡' : 'Create study card'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '上传资料并生成复习计划' : 'Upload notes and build a review plan'}</p></div>
+              {isUploadOpen && <button type="button" onClick={() => setIsUploadOpen(false)} className="ml-auto grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#f4f5f8] text-[#858a9d]"><X size={16} /></button>}
             </div>
 
+            {!isUploadOpen && (
+              <button type="button" onClick={() => setIsUploadOpen(true)} className="flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-[#635bff] to-[#5148ef] px-4 py-4 text-left text-white shadow-[0_10px_24px_rgba(99,91,255,0.22)] transition hover:-translate-y-0.5">
+                <span><strong className="block text-xs font-black">开始上传资料</strong><span className="mt-1 block text-[10px] font-medium text-white/70">新建复习卡、补打卡或重点复习</span></span><Plus size={20} />
+              </button>
+            )}
+
+            {isUploadOpen && <div className="mx-auto w-full max-w-2xl space-y-4">
             <input
               type="text"
               placeholder={t.titlePlaceholder}
@@ -1573,6 +1607,18 @@ export default function App() {
                 <History size={14} /> 补打卡
               </button>
             </div>
+
+            {uploadMode === 'makeup' && (
+              <div className="rounded-2xl border border-[#f3dfbd] bg-[#fffaf0] p-3.5">
+                <label className="flex items-center justify-between gap-3 text-[11px] font-extrabold text-[#79501d]">
+                  <span>补打第几次复习</span>
+                  <select value={makeupStage} onChange={(event) => setMakeupStage(Number(event.target.value))} className="rounded-xl border border-[#eccf9a] bg-white px-3 py-2 text-xs font-black text-[#79501d] outline-none">
+                    {Array.from({ length: 12 }, (_, index) => <option key={index + 1} value={index + 1}>第 {index + 1} 次</option>)}
+                  </select>
+                </label>
+                <p className="mt-2 text-[9px] font-medium text-[#a77b3b]">上传后会直接保存到资料库，并标注为“补打卡”。</p>
+              </div>
+            )}
 
             {uploadMode === 'study' && (
               <button
@@ -1650,15 +1696,16 @@ export default function App() {
                 </button>
               </div>
             )}
+            </div>}
           </section>
 
           {/* 🎯 今日复习关卡 */}
-          <section className="order-1 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 xl:col-span-2 xl:col-start-1 xl:row-start-2">
+          <section className={`${currentTab === 'database' ? 'hidden' : 'order-1'} space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 xl:col-span-2 xl:col-start-1 xl:row-start-2`}>
             <div className="flex justify-between items-center">
-              <div className="flex items-center gap-3">
+              <button type="button" onClick={() => { setSelectedScheduleDate(getTodayStr()); setIsScheduleOpen(true); }} className="flex items-center gap-3 text-left">
                 <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#efefff] text-[#635bff]"><Target size={18} /></div>
                 <div><h2 className="text-sm font-black">{t.todayTasks}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '智能错峰安排，每日最多 3 项' : 'Smart scheduling, up to 3 tasks daily'}</p></div>
-              </div>
+              </button>
               <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">
                 {todayTasks.length} 关卡
               </span>
@@ -1713,7 +1760,7 @@ export default function App() {
           </section>
 
           {/* 📂 资料历史数据库 */}
-          <section className="order-3 space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 xl:col-span-2 xl:col-start-1">
+          <section className={`${currentTab === 'database' ? 'order-1' : 'order-3'} space-y-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6 ${currentTab === 'database' ? '' : 'xl:col-span-2 xl:col-start-1'}`}>
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e9f8f2] text-[#16a776]"><FolderOpen size={18} /></div>
@@ -1818,7 +1865,7 @@ export default function App() {
                         {(metadata.isStarred || metadata.isMakeup) && (
                           <div className={`absolute left-2 top-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-extrabold backdrop-blur-sm ${metadata.isStarred ? 'bg-[#ffd967]/95 text-[#684500]' : 'bg-[#fff4e5]/95 text-[#b66a13]'}`}>
                             {metadata.isStarred ? <Star size={10} fill="currentColor" /> : <History size={10} />}
-                            {metadata.isStarred ? '重点' : '补打卡'}
+                            {metadata.isStarred ? '重点' : `补打卡 · 第${metadata.makeupStage || 1}次`}
                           </div>
                         )}
                       </div>
@@ -1861,7 +1908,7 @@ export default function App() {
             )}
           </section>
 
-          <section className="order-4 rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-3">
+          <section className={`${currentTab === 'database' ? 'hidden' : 'order-4'} rounded-[24px] border border-[#e6e8f0] bg-white p-5 shadow-[0_14px_38px_rgba(31,35,55,0.07)] xl:col-start-3 xl:row-start-3`}>
             <div className="flex items-center gap-3">
               <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#fff4e5] text-[#e89a2e]"><BookOpenCheck size={18} /></div>
               <div><h2 className="text-sm font-black">{lang === 'zh' ? '学习概览' : 'Learning overview'}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{lang === 'zh' ? '今天的实时学习进度' : 'Your live progress today'}</p></div>
@@ -1967,6 +2014,11 @@ export default function App() {
               <div className="grid grid-cols-2 gap-2 pt-3">
                 <div className="rounded-xl bg-[#f8f9fc] p-3"><strong className="block text-lg font-black">{streak}</strong><span className="text-[8px] font-semibold text-[#8b90a3]">Streak</span></div>
                 <div className="rounded-xl bg-[#f8f9fc] p-3"><strong className="block text-lg font-black">{xp}</strong><span className="text-[8px] font-semibold text-[#8b90a3]">XP</span></div>
+              </div>
+              <div className="rounded-2xl border border-[#e5e7ef] bg-[#fafbfc] p-4 text-left">
+                <div className="flex items-center justify-between"><span className="flex items-center gap-2 text-[10px] font-black text-[#676b7e]"><BookOpenCheck size={14} className="text-[#635bff]" />学习概览</span><span className="text-[9px] font-bold text-[#9296a8]">{items.length} 份资料</span></div>
+                <div className="mt-3 flex items-center justify-between text-[10px] font-bold text-[#777c8f]"><span>今日完成</span><span className="text-[#16a776]">{completedToday.length} / {todayTasks.length || 0}</span></div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#e8eaf1]"><div className="h-full rounded-full bg-[#635bff]" style={{ width: `${todayTasks.length === 0 ? 100 : Math.min(100, (completedToday.length / todayTasks.length) * 100)}%` }} /></div>
               </div>
             </div>
 
@@ -2077,8 +2129,9 @@ export default function App() {
                 </div>
                 <div className="flex flex-wrap gap-1.5 pt-1">
                   {subjects.map(s => (
-                    <span key={s} className="bg-white px-2.5 py-1 rounded-lg text-xs font-bold text-slate-600 border">
+                    <span key={s} className="flex items-center gap-1 rounded-lg border bg-white px-2.5 py-1 text-xs font-bold text-slate-600">
                       {s}
+                      {!DEFAULT_SUBJECTS.includes(s) && <button type="button" onClick={() => handleDeleteCustomSubject(s)} className="text-slate-400 hover:text-red-500" aria-label={`删除${s}`}><X size={11} /></button>}
                     </span>
                   ))}
                 </div>
@@ -2147,8 +2200,54 @@ export default function App() {
         </main>
       )}
 
+      {isScheduleOpen && (
+        <div className="fixed inset-0 z-40 overflow-y-auto bg-[#f5f6fa]">
+          <div className="mx-auto min-h-screen w-full max-w-5xl p-4 sm:p-7">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-[#8b90a3]">Review calendar</p>
+                <h2 className="mt-1 text-2xl font-black text-[#222536]">考试前复习安排</h2>
+                <p className="mt-1 text-[11px] font-semibold text-[#8b90a3]">每日最多 3 项，星标任务优先安排</p>
+              </div>
+              <button type="button" onClick={() => setIsScheduleOpen(false)} className="grid h-10 w-10 place-items-center rounded-xl bg-white text-[#73788b] shadow-sm"><X size={18} /></button>
+            </div>
+            <div className="rounded-[26px] border border-[#e5e7ef] bg-white p-4 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6">
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-black text-[#2d3040]"><CalendarDays size={16} className="text-[#635bff]" /> 复习日历</div>
+                <span className="rounded-full bg-[#efefff] px-3 py-1 text-[10px] font-black text-[#635bff]">{examDate ? `考试日 ${examDate}` : '未来 21 天'}</span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+                {scheduleDays.map(date => {
+                  const dayTasks = scheduledReviews.filter(task => task.scheduledDate === date);
+                  const active = selectedScheduleDate === date;
+                  return <button type="button" key={date} onClick={() => setSelectedScheduleDate(date)} className={`min-h-[78px] rounded-2xl border p-2 text-left transition ${active ? 'border-[#635bff] bg-[#efefff] shadow-sm' : 'border-[#e8eaf1] bg-[#fafbfc] hover:border-[#c7c3ff]'}`}>
+                    <span className={`block text-[10px] font-black ${active ? 'text-[#635bff]' : 'text-[#73788b]'}`}>{date.slice(5).replace('-', '/')}</span>
+                    <span className="mt-2 block text-base font-black text-[#292c3b]">{dayTasks.length}</span>
+                    <span className="text-[9px] font-semibold text-[#9499aa]">项任务</span>
+                  </button>;
+                })}
+              </div>
+            </div>
+            <div className="mt-4 rounded-[26px] border border-[#e5e7ef] bg-white p-4 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6">
+              <div className="mb-4 flex items-center justify-between"><h3 className="text-sm font-black text-[#292c3b]">{selectedScheduleDate} 的复习内容</h3><span className="rounded-full bg-[#f7f8fb] px-3 py-1 text-[10px] font-black text-[#73788b]">{selectedDayTasks.length} / 3</span></div>
+              {selectedDayTasks.length === 0 ? <div className="rounded-2xl bg-[#f8f9fc] py-12 text-center text-xs font-semibold text-[#9195a7]">当天没有安排复习任务</div> : <div className="space-y-2">{selectedDayTasks.map(task => <button type="button" key={`${task.item.id}-${task.stageNumber}`} onClick={() => { setIsScheduleOpen(false); setActiveModalItem({ item: task.item, stageNumber: task.stageNumber, type: 'review' }); }} className="flex w-full items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#fafbfc] p-4 text-left hover:border-[#c7c3ff]"><span className="min-w-0"><span className="flex items-center gap-2 text-[10px] font-black text-[#635bff]">第 {task.stageNumber} 次复习 {task.isStarred && <Star size={12} fill="currentColor" />}</span><strong className="mt-1 block truncate text-sm text-[#303344]">{task.item.title || task.item.subject}</strong><span className="mt-1 block text-[10px] font-semibold text-[#9296a8]">{task.item.subject}</span></span><ArrowRight size={16} className="shrink-0 text-[#a1a5b5]" /></button>)}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 📌 底部导航栏 */}
-      <nav className="fixed bottom-3 left-1/2 z-30 grid h-[68px] w-[calc(100%_-_28px)] max-w-md -translate-x-1/2 grid-cols-3 rounded-[21px] border border-[#e5e7ef] bg-white/95 p-1.5 shadow-[0_18px_50px_rgba(31,35,55,0.16)] backdrop-blur-xl lg:hidden">
+      <nav className="fixed bottom-3 left-1/2 z-30 grid h-[68px] w-[calc(100%_-_28px)] max-w-md -translate-x-1/2 grid-cols-4 rounded-[21px] border border-[#e5e7ef] bg-white/95 p-1.5 shadow-[0_18px_50px_rgba(31,35,55,0.16)] backdrop-blur-xl lg:hidden">
+        <button
+          onClick={() => setCurrentTab('database')}
+          className={`flex flex-col items-center justify-center gap-1 rounded-[14px] transition-all ${
+            currentTab === 'database' ? 'bg-[#efefff] text-[#635bff] font-extrabold' : 'text-[#9296a8] font-bold'
+          }`}
+        >
+          <FolderOpen size={18} strokeWidth={2} />
+          <span className="text-[10px]">资料库</span>
+        </button>
+
         <button
           onClick={() => setCurrentTab('home')}
           className={`flex flex-col items-center justify-center gap-1 rounded-[14px] transition-all ${
