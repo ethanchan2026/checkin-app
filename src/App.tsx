@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import { createClient } from '@supabase/supabase-js';
 import emailjs from '@emailjs/browser';
@@ -29,7 +29,6 @@ import {
   Sparkles,
   Star,
   Target,
-  Trash2,
   Trophy,
   UploadCloud,
   UserRound,
@@ -46,6 +45,7 @@ const SUPABASE_URL = 'https://oabwpouymbntlhvfbint.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9hYndwb3V5bWJudGxodmZiaW50Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODYyNTUwOTQsImV4cCI6MjEwMTgzMTA5NH0.mxV1y9WCR0iOikcf5DaHKxwS_UDKpv-_Mj46Zx9LUd0';
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  global: { fetch: (input, init) => fetch(input, { ...init, signal: AbortSignal.timeout(12000) }) },
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -56,6 +56,20 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const EMAILJS_SERVICE_ID = 'service_4uqz6bs';
 const EMAILJS_TEMPLATE_ID = 'template_f6qilz5';
 const EMAILJS_PUBLIC_KEY = 'M2sx40O9a6A-sMtH7';
+
+const REQUEST_TIMEOUT_MS = 12000;
+
+async function withTimeout<T>(request: PromiseLike<T>, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error('请求超时，请检查网络连接或 Supabase 配置。')), timeoutMs);
+  });
+  try {
+    return await Promise.race([Promise.resolve(request), timeout]);
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle);
+  }
+}
 
 // 🌐 常用时区配置列表
 const TIMEZONE_OPTIONS = [
@@ -78,6 +92,8 @@ interface RevisionLog {
   aiFeedback?: string;
   completed?: boolean;
   completedAt?: string;
+  awardedXp?: number;
+  scheduledDate?: string;
   kind?: 'metadata';
   isMakeup?: boolean;
   isStarred?: boolean;
@@ -280,7 +296,7 @@ function getCloudCompletedTaskIds(items: KnowledgeItem[], date: string) {
   });
 }
 
-type CropTarget = 'new' | 'review';
+type CropTarget = 'new' | 'review' | 'edit';
 interface CropSession {
   images: string[];
   currentIndex: number;
@@ -453,7 +469,6 @@ export default function App() {
   const [userTimezone, setUserTimezone] = useState<string>('Asia/Shanghai');
   const [examDate, setExamDate] = useState<string>('');
   const [isSavingExamDate, setIsSavingExamDate] = useState(false);
-  const [databaseView, setDatabaseView] = useState<'study' | 'makeup'>('study');
   const [isScheduleOpen, setIsScheduleOpen] = useState(false);
   const [selectedScheduleDate, setSelectedScheduleDate] = useState(getTodayStr());
 
@@ -477,14 +492,24 @@ export default function App() {
   const [activeModalItem, setActiveModalItem] = useState<{ 
     item: KnowledgeItem; 
     stageNumber: number;
+    scheduledDate?: string;
     type: 'review' | 'viewFolder' 
   } | null>(null);
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editSubject, setEditSubject] = useState('');
+  const [editStarred, setEditStarred] = useState(false);
+  const [editImages, setEditImages] = useState<string[]>([]);
+  const [editMode, setEditMode] = useState<'study' | 'makeup'>('study');
+  const [editStage, setEditStage] = useState(1);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const [loading, setLoading] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string>('');
+  const syncInProgress = useRef(false);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    withTimeout(supabase.auth.getSession()).then(({ data: { session } }) => {
       setSession(session);
       setAuthChecking(false);
       setSyncError('');
@@ -510,7 +535,7 @@ export default function App() {
       fetchCustomSubjects();
       fetchUserProfile();
     }
-  }, [session]);
+  }, [session?.user?.id, session?.user?.user_metadata?.exam_date]);
 
   useEffect(() => {
     if (!session?.user?.id) return;
@@ -536,16 +561,18 @@ export default function App() {
   };
 
   function getTodayStr() {
-    return new Date().toISOString().split('T')[0];
+    return new Intl.DateTimeFormat('en-CA', { timeZone: userTimezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
   }
 
   const todayTasks = buildReviewSchedule(items, getTodayStr(), examDate)
     .filter(task => task.scheduledDate === getTodayStr())
+    .filter(task => !getVisibleRevisions(task.item).some(revision => Number(revision.stage) === task.stageNumber && revision.completed !== false && revision.date < getTodayStr()))
     .sort((left, right) => Number(right.isStarred) - Number(left.isStarred));
   const scheduledReviews = buildReviewSchedule(items, getTodayStr(), examDate);
   const scheduleHorizon = examDate && examDate >= getTodayStr() ? examDate : addDays(getTodayStr(), 20);
-  const scheduleDays = Array.from({ length: Math.min(31, Math.max(1, daysBetween(getTodayStr(), scheduleHorizon) + 1)) }, (_, index) => addDays(getTodayStr(), index));
-  const selectedDayTasks = scheduledReviews.filter(task => task.scheduledDate === selectedScheduleDate);
+  const scheduleDays = Array.from({ length: Math.max(1, daysBetween(getTodayStr(), scheduleHorizon) + 1) }, (_, index) => addDays(getTodayStr(), index));
+  const selectedDayTasks = scheduledReviews.filter(task => task.scheduledDate === selectedScheduleDate)
+    .filter(task => !getVisibleRevisions(task.item).some(revision => Number(revision.stage) === task.stageNumber && revision.completed !== false));
 
   const sendReviewReminderEmail = async (tasks: Array<{ item: KnowledgeItem; stageNumber: number }>) => {
     const recipientEmail = session?.user?.email;
@@ -553,24 +580,14 @@ export default function App() {
       throw new Error(lang === 'zh' ? '当前账户没有可用邮箱' : 'No email address is available for this account');
     }
 
-    const taskList = tasks
-      .map(({ item, stageNumber }, index) =>
-        `${index + 1}. [${item.subject}] ${item.title || item.subject} (${t.dayStageText(stageNumber)})`
-      )
-      .join('\n');
-
-    await emailjs.send(
-      EMAILJS_SERVICE_ID,
-      EMAILJS_TEMPLATE_ID,
-      {
-        to_email: recipientEmail,
-        user_email: recipientEmail,
-        task_count: tasks.length,
-        task_list: taskList,
-        date: getTodayStr(),
-      },
-      EMAILJS_PUBLIC_KEY
-    );
+    const response = await fetch('/api/send-reminder', {
+      method: 'POST',
+      signal: AbortSignal.timeout(25000),
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({ itemId: tasks[0]?.item.id }),
+    });
+    const responseBody = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(responseBody?.error || 'Resend 提醒邮件发送失败');
   };
 
   // 获取用户个人配置（提醒时间与时区）
@@ -753,15 +770,16 @@ export default function App() {
   }
 
   async function fetchData() {
-    if (!session?.user?.id) return;
+    if (!session?.user?.id || syncInProgress.current) return;
+    syncInProgress.current = true;
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      const { data, error } = await withTimeout(supabase
         .from('knowledge_base')
         .select('*')
         .eq('user_id', session.user.id)
-        .order('created_at', { ascending: false });
+        .order('created_at', { ascending: false }));
 
       const savedStreak = localStorage.getItem(`checkin_streak_${session.user.id}`);
       const savedXp = localStorage.getItem(`checkin_xp_${session.user.id}`);
@@ -784,7 +802,8 @@ export default function App() {
       if (error) throw error;
       let loadedItemCount = items.length;
       if (data) {
-        const syncedItems = await persistLocalCompletions(data, localCompleted, getTodayStr());
+        setItems(data);
+        const syncedItems = await withTimeout(persistLocalCompletions(data, localCompleted, getTodayStr()));
         const cloudCompleted = getCloudCompletedTaskIds(syncedItems, getTodayStr());
         const syncedCompleted = Array.from(new Set([...localCompleted, ...cloudCompleted]));
         loadedItemCount = syncedItems.length;
@@ -800,12 +819,13 @@ export default function App() {
 
       setStreak(nextStreak);
       setXp(nextXp);
-      await fetchLeaderboard({ streak: nextStreak, xp: nextXp, itemCount: loadedItemCount });
+      void fetchLeaderboard({ streak: nextStreak, xp: nextXp, itemCount: loadedItemCount }).catch(error => console.warn('排行榜暂时不可用', error));
       setSyncError('');
     } catch (error) {
       console.error('同步云端数据失败:', error);
       setSyncError(getNetworkErrorMessage(error, '云端数据同步失败，请稍后重试。'));
     } finally {
+      syncInProgress.current = false;
       setLoading(false);
     }
   }
@@ -1018,6 +1038,8 @@ export default function App() {
       const croppedImage = await createCroppedImage(cropSession.images[cropSession.currentIndex], croppedAreaPixels);
       if (cropSession.target === 'new') {
         setPreviewImages(prev => [...prev, croppedImage]);
+      } else if (cropSession.target === 'edit') {
+        setEditImages(prev => [...prev, croppedImage]);
       } else {
         setReviewNewImages(prev => [...prev, croppedImage]);
         setAiFeedback('');
@@ -1058,23 +1080,36 @@ export default function App() {
     e.target.value = '';
   };
 
-  const handleRenameItem = async (id: string, currentTitle?: string) => {
-    const promptTitle = prompt(t.enterNewTitle, currentTitle || '');
-    if (promptTitle !== null) {
-      const trimmedTitle = promptTitle.trim();
-      const updatedItems = items.map(item => {
-        if (item.id === id) {
-          return { ...item, title: trimmedTitle };
-        }
-        return item;
-      });
-      setItems(updatedItems);
+  const openItemEditor = (item: KnowledgeItem) => {
+    const metadata = getItemMetadata(item);
+    setEditingItemId(item.id);
+    setEditTitle(item.title || '');
+    setEditSubject(item.subject);
+    setEditStarred(metadata.isStarred);
+    setEditImages(getItemImages(item));
+    setEditMode(metadata.isMakeup ? 'makeup' : 'study');
+    setEditStage(metadata.makeupStage || 1);
+    setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' });
+  };
 
-      await supabase
-        .from('knowledge_base')
-        .update({ title: trimmedTitle })
-        .eq('id', id);
-    }
+  const saveItemEditor = async () => {
+    if (!editingItemId || !session?.user?.id || savingEdit) return;
+    if (!editImages.length) { alert('请至少保留一张图片'); return; }
+    const item = items.find(currentItem => currentItem.id === editingItemId);
+    if (!item) return;
+    const revisions: RevisionLog[] = [...getVisibleRevisions(item), { stage: '__metadata__', kind: 'metadata', date: item.uploadDate, isStarred: editMode === 'study' && editStarred, isMakeup: editMode === 'makeup', makeupStage: editStage }];
+    const updates = { title: editTitle.trim() || `${editSubject} 知识卡`, subject: editSubject, imageUrls: editImages, imageUrl: editImages[0], revisions };
+    setSavingEdit(true);
+    try {
+    const { data, error } = await withTimeout(supabase.from('knowledge_base').update(updates).eq('id', editingItemId).eq('user_id', session.user.id).select('id').maybeSingle());
+    if (error) throw error;
+    if (!data) throw new Error('未找到可编辑的资料');
+    const updatedItem = { ...item, ...updates };
+    setItems(currentItems => currentItems.map(currentItem => currentItem.id === item.id ? updatedItem : currentItem));
+    setActiveModalItem({ item: updatedItem, stageNumber: 1, type: 'viewFolder' });
+    setEditingItemId(null);
+    } catch (error) { alert(getNetworkErrorMessage(error, '保存编辑失败')); }
+    finally { setSavingEdit(false); }
   };
 
   const handleGeminiCorrection = async () => {
@@ -1297,13 +1332,20 @@ export default function App() {
     setIsSavingKnowledge(false);
   };
 
-  const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber: number) => {
-    if (!session?.user?.id || completedToday.includes(taskId) || completingTaskId === taskId) return;
+  const handleCompleteTask = async (taskId: string, item: KnowledgeItem, stageNumber: number, isEarly = false) => {
+    if (!session?.user?.id || completedToday.includes(taskId) || completingTaskId) return;
+    if (isEarly && (completedToday.length < 3 || reviewNewImages.length === 0)) {
+      alert('当天完成至少 3 项后，请上传本次复习图片，再领取提前打卡奖励。');
+      return;
+    }
 
     setCompletingTaskId(taskId);
     try {
       const completionDate = getTodayStr();
-      const updatedRevisions = Array.isArray(item.revisions) ? [...item.revisions] : [];
+      const { data: freshItem, error: readError } = await withTimeout(supabase.from('knowledge_base').select('revisions').eq('id', item.id).eq('user_id', session.user.id).single());
+      if (readError) throw readError;
+      const updatedRevisions: RevisionLog[] = Array.isArray(freshItem.revisions) ? [...freshItem.revisions] : [];
+      if (updatedRevisions.some(revision => Number(revision.stage) === stageNumber && revision.completed !== false)) throw new Error('这次复习已完成，无需重复打卡');
       const existingRevisionIndex = updatedRevisions.findIndex(
         revision => Number(revision.stage) === stageNumber && revision.date === completionDate
       );
@@ -1316,6 +1358,8 @@ export default function App() {
         date: completionDate,
         completed: true,
         completedAt: new Date().toISOString(),
+        awardedXp: isEarly ? 50 : 20,
+        scheduledDate: activeModalItem?.scheduledDate,
         ...(reviewNewImages.length > 0
           ? { imageUrl: reviewNewImages[0], imageUrls: reviewNewImages }
           : {}),
@@ -1354,12 +1398,13 @@ export default function App() {
         JSON.stringify(newCompleted)
       );
 
-      const newXp = xp + 20;
+      const newXp = xp + (isEarly ? 50 : 20);
       let newStreak = streak;
       setXp(newXp);
       localStorage.setItem(`checkin_xp_${session.user.id}`, newXp.toString());
 
-      if (newCompleted.length === todayTasks.length) {
+      if (todayTasks.length > 0 && todayTasks.every(task => newCompleted.includes(`${task.item.id}_stage${task.stageNumber}`)) && localStorage.getItem(`checkin_streak_awarded_${session.user.id}`) !== completionDate) {
+        localStorage.setItem(`checkin_streak_awarded_${session.user.id}`, completionDate);
         newStreak = streak + 1;
         setStreak(newStreak);
         localStorage.setItem(`checkin_streak_${session.user.id}`, newStreak.toString());
@@ -1371,7 +1416,7 @@ export default function App() {
       setReviewNewImages([]);
       setAiFeedback('');
       setActiveModalItem(null);
-      await fetchLeaderboard({ streak: newStreak, xp: newXp, itemCount: items.length });
+      void fetchLeaderboard({ streak: newStreak, xp: newXp, itemCount: items.length }).catch(error => console.warn('排行榜暂时不可用', error));
     } catch (error: any) {
       console.error('同步任务完成状态失败:', error);
       alert(lang === 'zh'
@@ -1385,17 +1430,20 @@ export default function App() {
 
   const handleDeleteItem = async (id: string) => {
     if (window.confirm('确定要删除这套资料吗？')) {
-      await supabase.from('knowledge_base').delete().eq('id', id);
+      try {
+      const { data, error } = await withTimeout(supabase.from('knowledge_base').delete().eq('id', id).eq('user_id', session.user.id).select('id').maybeSingle());
+      if (error) throw error;
+      if (!data) throw new Error('未找到可删除的资料');
       const filtered = items.filter(i => i.id !== id);
       setItems(filtered);
       setActiveModalItem(null);
-      fetchLeaderboard();
+      setEditingItemId(null);
+      void fetchLeaderboard().catch(error => console.warn('排行榜暂时不可用', error));
+      } catch (error) { alert(getNetworkErrorMessage(error, '删除失败，请重试')); }
     }
   };
 
   const filteredDatabaseItems = items.filter(item => {
-    const metadata = getItemMetadata(item);
-    if (databaseView === 'makeup' ? !metadata.isMakeup : metadata.isMakeup) return false;
     const matchSubject = selectedSubject === 'ALL' || item.subject === selectedSubject;
     const query = searchQuery.trim().toLowerCase();
     if (!query) return matchSubject;
@@ -1764,26 +1812,9 @@ export default function App() {
             <div className="flex justify-between items-center">
               <div className="flex items-center gap-3">
                 <div className="grid h-9 w-9 place-items-center rounded-xl bg-[#e9f8f2] text-[#16a776]"><FolderOpen size={18} /></div>
-                <div><h2 className="text-sm font-black">{databaseView === 'study' ? t.databaseTitle : (lang === 'zh' ? '补打卡数据库' : 'Make-up check-ins')}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">{databaseView === 'study' ? (lang === 'zh' ? '管理所有知识卡与复习记录' : 'Manage cards and review history') : (lang === 'zh' ? '单独保存过去遗漏的打卡内容' : 'Past make-up records kept separately')}</p></div>
+                <div><h2 className="text-sm font-black">{t.databaseTitle}</h2><p className="mt-0.5 text-[9px] font-semibold text-[#8a8fa2]">管理所有知识卡、复习记录与补打卡</p></div>
               </div>
               <span className="rounded-full bg-[#f7f8fb] px-2.5 py-1 text-[9px] font-bold text-[#73788b]">{filteredDatabaseItems.length} 套</span>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2 rounded-2xl bg-[#f7f8fb] p-1.5">
-              <button
-                type="button"
-                onClick={() => setDatabaseView('study')}
-                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[10px] font-extrabold transition ${databaseView === 'study' ? 'bg-white text-[#635bff] shadow-sm' : 'text-[#7d8295]'}`}
-              >
-                <FolderOpen size={13} /> 复习资料
-              </button>
-              <button
-                type="button"
-                onClick={() => setDatabaseView('makeup')}
-                className={`flex items-center justify-center gap-1.5 rounded-xl py-2 text-[10px] font-extrabold transition ${databaseView === 'makeup' ? 'bg-white text-[#e58b25] shadow-sm' : 'text-[#7d8295]'}`}
-              >
-                <History size={13} /> 补打卡记录
-              </button>
             </div>
 
             <div className="relative flex items-center">
@@ -1851,7 +1882,7 @@ export default function App() {
                       className="group flex flex-col space-y-2 overflow-hidden rounded-2xl border border-[#e5e7ef] bg-white p-2.5 transition-all hover:-translate-y-1 hover:shadow-[0_12px_24px_rgba(31,35,55,0.09)]"
                     >
                       <div 
-                        onClick={() => setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' })}
+                        onClick={() => { setEditingItemId(null); setActiveModalItem({ item, stageNumber: 1, type: 'viewFolder' }); }}
                         className="relative h-32 w-full shrink-0 cursor-pointer overflow-hidden rounded-xl bg-[#f1f2f7]"
                       >
                         <img 
@@ -1862,7 +1893,7 @@ export default function App() {
                         <div className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-[#2b2e3d]/80 px-2 py-1 text-[9px] font-extrabold text-white backdrop-blur-sm">
                           <ImageIcon size={11} /> {totalPhotos} {t.totalPhotos}
                         </div>
-                        {(metadata.isStarred || metadata.isMakeup) && (
+                        {metadata.isStarred && (
                           <div className={`absolute left-2 top-2 flex items-center gap-1 rounded-lg px-2 py-1 text-[9px] font-extrabold backdrop-blur-sm ${metadata.isStarred ? 'bg-[#ffd967]/95 text-[#684500]' : 'bg-[#fff4e5]/95 text-[#b66a13]'}`}>
                             {metadata.isStarred ? <Star size={10} fill="currentColor" /> : <History size={10} />}
                             {metadata.isStarred ? '重点' : `补打卡 · 第${metadata.makeupStage || 1}次`}
@@ -1872,9 +1903,9 @@ export default function App() {
 
                       <div className="px-0.5">
                         <div 
-                          onClick={() => handleRenameItem(item.id, item.title)}
+                          onClick={() => openItemEditor(item)}
                           className="font-bold text-xs text-slate-800 truncate cursor-pointer hover:text-indigo-600 flex items-center gap-1"
-                          title="点击可重命名"
+                          title="点击编辑资料"
                         >
                           <span className="truncate">{displayTitle}</span>
                           <Pencil size={11} className="shrink-0 text-[#a0a4b4]" />
@@ -1889,17 +1920,12 @@ export default function App() {
 
                       <div className="flex justify-between items-center px-0.5 pt-1 border-t border-slate-200/60">
                         <button
-                          onClick={() => handleRenameItem(item.id, item.title)}
+                          onClick={() => openItemEditor(item)}
                           className="flex items-center gap-1 text-[9px] font-bold text-[#777c8f] hover:text-[#635bff]"
                         >
-                          <Pencil size={11} /> {t.renameSet}
+                          <Pencil size={11} /> 编辑资料
                         </button>
-                        <button
-                          onClick={() => handleDeleteItem(item.id)}
-                          className="flex items-center gap-1 text-[9px] font-bold text-[#d87070] hover:text-red-600"
-                        >
-                          <Trash2 size={11} /> {t.deleteSet}
-                        </button>
+                        {metadata.isMakeup && <span className="rounded bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">补打卡 · 第 {metadata.makeupStage || 1} 次</span>}
                       </div>
                     </div>
                   );
@@ -2216,21 +2242,20 @@ export default function App() {
                 <div className="flex items-center gap-2 text-xs font-black text-[#2d3040]"><CalendarDays size={16} className="text-[#635bff]" /> 复习日历</div>
                 <span className="rounded-full bg-[#efefff] px-3 py-1 text-[10px] font-black text-[#635bff]">{examDate ? `考试日 ${examDate}` : '未来 21 天'}</span>
               </div>
-              <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
+              <div className="grid max-h-[28vh] grid-cols-7 gap-1.5 overflow-y-auto sm:grid-cols-10">
                 {scheduleDays.map(date => {
                   const dayTasks = scheduledReviews.filter(task => task.scheduledDate === date);
                   const active = selectedScheduleDate === date;
-                  return <button type="button" key={date} onClick={() => setSelectedScheduleDate(date)} className={`min-h-[78px] rounded-2xl border p-2 text-left transition ${active ? 'border-[#635bff] bg-[#efefff] shadow-sm' : 'border-[#e8eaf1] bg-[#fafbfc] hover:border-[#c7c3ff]'}`}>
-                    <span className={`block text-[10px] font-black ${active ? 'text-[#635bff]' : 'text-[#73788b]'}`}>{date.slice(5).replace('-', '/')}</span>
-                    <span className="mt-2 block text-base font-black text-[#292c3b]">{dayTasks.length}</span>
-                    <span className="text-[9px] font-semibold text-[#9499aa]">项任务</span>
+                  return <button type="button" key={date} onClick={() => setSelectedScheduleDate(date)} aria-label={date} className={`relative h-11 rounded-xl border text-center transition ${active ? 'border-[#635bff] bg-[#efefff] shadow-sm' : dayTasks.length > 0 ? 'border-[#a8a3ff] bg-[#f3f2ff] hover:border-[#635bff]' : 'border-[#e8eaf1] bg-[#fafbfc] hover:border-[#c7c3ff]'}`}>
+                    <span className={`text-[10px] font-black ${active ? 'text-[#635bff]' : 'text-[#73788b]'}`}>{date.slice(5).replace('-', '/')}</span>
+                    {dayTasks.length > 0 && <span className="absolute bottom-1 left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-[#635bff]" />}
                   </button>;
                 })}
               </div>
             </div>
             <div className="mt-4 rounded-[26px] border border-[#e5e7ef] bg-white p-4 shadow-[0_14px_38px_rgba(31,35,55,0.07)] sm:p-6">
               <div className="mb-4 flex items-center justify-between"><h3 className="text-sm font-black text-[#292c3b]">{selectedScheduleDate} 的复习内容</h3><span className="rounded-full bg-[#f7f8fb] px-3 py-1 text-[10px] font-black text-[#73788b]">{selectedDayTasks.length} / 3</span></div>
-              {selectedDayTasks.length === 0 ? <div className="rounded-2xl bg-[#f8f9fc] py-12 text-center text-xs font-semibold text-[#9195a7]">当天没有安排复习任务</div> : <div className="space-y-2">{selectedDayTasks.map(task => <button type="button" key={`${task.item.id}-${task.stageNumber}`} onClick={() => { setIsScheduleOpen(false); setActiveModalItem({ item: task.item, stageNumber: task.stageNumber, type: 'review' }); }} className="flex w-full items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#fafbfc] p-4 text-left hover:border-[#c7c3ff]"><span className="min-w-0"><span className="flex items-center gap-2 text-[10px] font-black text-[#635bff]">第 {task.stageNumber} 次复习 {task.isStarred && <Star size={12} fill="currentColor" />}</span><strong className="mt-1 block truncate text-sm text-[#303344]">{task.item.title || task.item.subject}</strong><span className="mt-1 block text-[10px] font-semibold text-[#9296a8]">{task.item.subject}</span></span><ArrowRight size={16} className="shrink-0 text-[#a1a5b5]" /></button>)}</div>}
+              {selectedDayTasks.length === 0 ? <div className="rounded-2xl bg-[#f8f9fc] py-12 text-center text-xs font-semibold text-[#9195a7]">当天没有安排复习任务</div> : <div className="space-y-2">{selectedDayTasks.map(task => { const isEarly = task.scheduledDate > getTodayStr(); return <button type="button" key={`${task.item.id}-${task.stageNumber}`} onClick={() => { setIsScheduleOpen(false); setActiveModalItem({ item: task.item, stageNumber: task.stageNumber, scheduledDate: task.scheduledDate, type: 'review' }); }} className="flex w-full items-center justify-between rounded-2xl border border-[#e8eaf1] bg-[#fafbfc] p-4 text-left hover:border-[#c7c3ff]"><span className="min-w-0"><span className="flex items-center gap-2 text-[10px] font-black text-[#635bff]">第 {task.stageNumber} 次复习 {task.isStarred && <Star size={12} fill="currentColor" />}</span><strong className="mt-1 block truncate text-sm text-[#303344]">{task.item.title || task.item.subject}</strong><span className="mt-1 block text-[10px] font-semibold text-[#9296a8]">{task.item.subject} · {isEarly ? '提前完成可获额外奖励' : '按计划复习'}</span></span><ArrowRight size={16} className="shrink-0 text-[#a1a5b5]" /></button>; })}</div>}
             </div>
           </div>
         </div>
@@ -2483,7 +2508,8 @@ export default function App() {
                   onClick={() => handleCompleteTask(
                     `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`,
                     activeModalItem.item,
-                    activeModalItem.stageNumber
+                    activeModalItem.stageNumber,
+                    Boolean(activeModalItem.scheduledDate && activeModalItem.scheduledDate > getTodayStr())
                   )}
                   disabled={completingTaskId === `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-[#16a776] py-3.5 font-extrabold text-white shadow-[0_10px_22px_rgba(22,167,118,0.24)] transition-all hover:bg-[#128d64] disabled:cursor-wait disabled:opacity-60"
@@ -2491,7 +2517,9 @@ export default function App() {
                   <Check size={17} />
                   {completingTaskId === `${activeModalItem.item.id}_stage${activeModalItem.stageNumber}`
                     ? t.syncing
-                    : t.completeBtn}
+                    : activeModalItem.scheduledDate && activeModalItem.scheduledDate > getTodayStr()
+                      ? '上传并提前打卡 · 50 XP（含额外 30）'
+                      : t.completeBtn}
                 </button>
               </div>
             )}
@@ -2499,6 +2527,21 @@ export default function App() {
             {/* 📂 资料库相册弹窗 */}
             {activeModalItem.type === 'viewFolder' && (
               <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
+                {editingItemId === activeModalItem.item.id && (
+                  <div className="space-y-3 rounded-2xl border border-[#dcd9ff] bg-[#f7f6ff] p-4">
+                    <div className="flex items-center justify-between"><strong className="text-xs font-black text-[#5148df]">编辑资料</strong><button type="button" onClick={() => setEditingItemId(null)} className="text-[10px] font-bold text-[#858a9d]">取消</button></div>
+                    <input value={editTitle} onChange={event => setEditTitle(event.target.value)} placeholder="资料名称" className="h-10 w-full rounded-xl border border-[#dedcff] bg-white px-3 text-xs font-bold outline-none focus:border-[#635bff]" />
+                    <select value={editSubject} onChange={event => setEditSubject(event.target.value)} className="h-10 w-full rounded-xl border border-[#dedcff] bg-white px-3 text-xs font-bold outline-none focus:border-[#635bff]">
+                      {Array.from(new Set([...subjects, editSubject])).map(subject => <option key={subject} value={subject}>{subject}</option>)}
+                    </select>
+                    {editMode === 'study' && <button type="button" onClick={() => setEditStarred(current => !current)} className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-xs font-bold ${editStarred ? 'border-[#f3cf76] bg-[#fff9e8] text-[#8a5a00]' : 'border-[#e5e7ef] bg-white text-[#73788b]'}`}><span className="flex items-center gap-2"><Star size={14} fill={editStarred ? 'currentColor' : 'none'} />星标重点复习</span><span>{editStarred ? '已开启' : '未开启'}</span></button>}
+                    <label className="block text-xs">记录类型<select aria-label="记录类型" value={editMode} onChange={event => setEditMode(event.target.value as 'study' | 'makeup')} className="ml-3 rounded-xl border p-2"><option value="study">复习资料</option><option value="makeup">补打卡</option></select></label>
+                    {editMode === 'makeup' && <label className="block text-xs">第几次复习<input aria-label="补打卡次数" type="number" min={1} max={999} value={editStage} onChange={event => setEditStage(Math.max(1, Math.min(999, Number(event.target.value))))} className="ml-3 w-20 rounded-xl border p-2" /></label>}
+                    <div className="grid grid-cols-3 gap-2">{editImages.map((image, index) => <div key={index}><img src={image} alt={`笔记 ${index + 1}`} className="aspect-square w-full rounded-xl object-cover" /><button type="button" onClick={() => setEditImages(current => current.filter((_, position) => position !== index))} className="py-2 text-xs text-red-600">移除此图</button></div>)}</div>
+                    <label className="block rounded-xl border border-dashed p-3 text-center text-xs">添加或替换笔记图片<input type="file" accept="image/*" multiple className="mt-2 block w-full" onChange={async event => { const files = Array.from(event.target.files || []); event.target.value = ''; try { const images = await Promise.all(files.map(file => compressImage(file))); if (images.length) openCropSession(images, 'edit'); } catch { alert('图片读取失败，请重试'); } }} /></label>
+                    <button type="button" disabled={savingEdit} onClick={saveItemEditor} className="w-full rounded-xl bg-[#635bff] py-2.5 text-xs font-black text-white disabled:opacity-50">{savingEdit ? '保存中…' : '保存修改'}</button>
+                  </div>
+                )}
                 <div className="bg-slate-50 rounded-2xl p-3 border space-y-2">
                   <div className="flex justify-between items-center text-xs font-bold">
                     <span className="text-slate-800">{activeModalItem.item.title || activeModalItem.item.subject}</span>
@@ -2516,6 +2559,7 @@ export default function App() {
                           alt={`Initial ${idx + 1}`}
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform"
                         />
+                        {getItemMetadata(activeModalItem.item).isMakeup && <span className="absolute bottom-1 left-1 rounded bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800">补打卡 · 第 {getItemMetadata(activeModalItem.item).makeupStage || 1} 次</span>}
                         <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[9px] font-bold px-1.5 py-0.5 rounded backdrop-blur-sm">
                           #{idx + 1}
                         </div>
@@ -2568,6 +2612,12 @@ export default function App() {
                   className="w-full py-2.5 bg-slate-800 text-white font-bold rounded-2xl text-xs"
                 >
                   {t.close}
+                </button>
+                <button
+                  onClick={() => handleDeleteItem(activeModalItem.item.id)}
+                  className="w-full rounded-2xl border border-red-100 bg-red-50 py-2.5 text-xs font-black text-red-600"
+                >
+                  删除这份资料
                 </button>
               </div>
             )}

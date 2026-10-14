@@ -254,7 +254,7 @@ async function run() {
     const todayTasks = buildReviewSchedule(userItems, userTodayStr, examDateMap[userId] || '')
       .filter(task => task.scheduledDate === userTodayStr)
       .filter(task => !task.item.revisions?.some(revision =>
-        Number(revision.stage) === task.stageNumber && revision.date === userTodayStr
+        Number(revision.stage) === task.stageNumber && revision.completed !== false
       ))
       .sort((left, right) => Number(right.isStarred) - Number(left.isStarred));
 
@@ -296,9 +296,11 @@ async function run() {
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
+        signal: AbortSignal.timeout(15000),
         headers: {
           Authorization: `Bearer ${RESEND_API_KEY}`,
           'Content-Type': 'application/json',
+          'Idempotency-Key': `daily/${email}/${todayStr}`,
         },
         body: JSON.stringify({
           from: `复习打卡提醒 <${SENDER_EMAIL}>`,
